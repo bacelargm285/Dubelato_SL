@@ -223,6 +223,95 @@ DB.excel = (function () {
     return items.length ? items : null;
   }
 
+  /* ---------- 5. CUBAS (receitas + preços de matéria-prima + produtos) ---------- */
+
+  /** Converte peso de embalagem em kg: "1kg ", "25kg", "2,5kg", "9.8kg", "3,25KG", "5 kg", "30kg" */
+  function pesoKg(v) {
+    if (v == null) return null;
+    if (typeof v === 'number') return v;
+    const m = U.norm(v).replace(',', '.').match(/([\d.]+)\s*kg/);
+    return m ? parseFloat(m[1]) : null;
+  }
+
+  function parseCubas(ws) {
+    const rows = grid(ws);
+    if (!rows.length) return null;
+
+    // detecta cabeçalho de receitas: linha com "sabor" + "item" + ("qtd" ou "proporcao")
+    let recCols = null;
+    for (let i = 0; i < Math.min(rows.length, 5); i++) {
+      const c = {};
+      (rows[i] || []).forEach((cell, j) => {
+        const n = U.norm(cell);
+        if (n === 'sabor') c.sabor = j;
+        else if (n === 'item' && c.item == null) c.item = j;
+        else if (n === 'qtd') c.qtd = j;
+        else if (n.startsWith('proporcao')) c.prop = j;
+      });
+      if (c.sabor != null && c.item != null && (c.qtd != null || c.prop != null)) { recCols = c; break; }
+    }
+    if (!recCols) return null;
+
+    // receitas: blocos separados por linhas de cabeçalho repetidas
+    const receitas = {}; // sabor -> { base:[{item,qtd}], mescla:[{item,qtd}] }
+    for (const r of rows) {
+      if (!r) continue;
+      const sabor = String(r[recCols.sabor] ?? '').trim();
+      const item = String(r[recCols.item] ?? '').trim();
+      if (!sabor || !item || U.norm(sabor) === 'sabor') continue;
+      const qtd = U.toNum(r[recCols.qtd]);
+      if (qtd == null) continue;
+      const prop = r[recCols.prop];
+      const ehMescla = U.norm(prop) === 'mescla';
+      const rec = receitas[sabor] || (receitas[sabor] = { sabor, base: [], mescla: [] });
+      (ehMescla ? rec.mescla : rec.base).push({ item, qtd });
+    }
+    if (!Object.keys(receitas).length) return null;
+
+    // preços de matéria-prima: âncora = célula "peso prod"
+    const precos = {}; // norm(item) -> { nome, precoPacote, pesoKg, precoKg }
+    let pr = null;
+    outer:
+    for (let i = 0; i < Math.min(rows.length, 6); i++) {
+      for (let j = 0; j < (rows[i] || []).length; j++) {
+        if (U.norm(rows[i][j]) === 'peso prod') { pr = { row: i, nome: j - 2, preco: j - 1, peso: j, kg: j + 1 }; break outer; }
+      }
+    }
+    if (pr) {
+      for (let i = pr.row + 1; i < rows.length; i++) {
+        const r = rows[i]; if (!r) continue;
+        const nome = String(r[pr.nome] ?? '').trim();
+        if (!nome) continue;
+        const precoPacote = U.toNum(r[pr.preco]);
+        const kgPacote = pesoKg(r[pr.peso]);
+        let precoKg = U.toNum(r[pr.kg]);
+        if (precoKg == null && precoPacote != null && kgPacote) precoKg = precoPacote / kgPacote;
+        precos[U.norm(nome)] = { nome, precoPacote, pesoKg: kgPacote, precoKg };
+      }
+    }
+
+    // produtos vendidos: âncora = cabeçalho "gramas" com "valor" ao lado
+    const produtos = [];
+    let pd = null;
+    outer2:
+    for (let i = 0; i < Math.min(rows.length, 6); i++) {
+      for (let j = 1; j < (rows[i] || []).length; j++) {
+        if (U.norm(rows[i][j]) === 'gramas' && U.norm(rows[i][j + 1]) === 'valor') { pd = { row: i, nome: j - 1, gramas: j, preco: j + 1 }; break outer2; }
+      }
+    }
+    if (pd) {
+      for (let i = pd.row + 1; i < rows.length; i++) {
+        const r = rows[i]; if (!r) continue;
+        const nome = String(r[pd.nome] ?? '').trim();
+        const gramas = U.toNum(r[pd.gramas]);
+        const preco = U.toNum(r[pd.preco]);
+        if (nome && gramas && preco != null) produtos.push({ nome, gramas, preco });
+      }
+    }
+
+    return { receitas: Object.values(receitas), precos, produtos };
+  }
+
   /* ---------- ORQUESTRAÇÃO ---------- */
 
   /**
@@ -230,7 +319,7 @@ DB.excel = (function () {
    * não pelo nome. Retorna o modelo de dados bruto.
    */
   function parseWorkbook(wb) {
-    const model = { txs: [], estoque: [], boletos: [], cartao: [], abas: [], avisos: [] };
+    const model = { txs: [], estoque: [], boletos: [], cartao: [], cubas: null, abas: [], avisos: [] };
     const nomes = wb.SheetNames;
 
     // 1ª passada: lançamentos (para descobrir o ano de referência dos boletos)
@@ -238,6 +327,10 @@ DB.excel = (function () {
       const ws = wb.Sheets[name];
       const n = U.norm(name);
       if (n.includes('detalhado') || n.includes('resumo')) { model.abas.push({ name, tipo: 'resumo (ignorada — recalculado)' }); continue; }
+      if (n.includes('cuba') || n.includes('receita') || n.includes('sabor')) {
+        const cb = parseCubas(ws);
+        if (cb) { model.cubas = cb; model.abas.push({ name, tipo: `cubas (${cb.receitas.length} sabores, ${Object.keys(cb.precos).length} preços, ${cb.produtos.length} produtos)` }); continue; }
+      }
       if (n.includes('estoque')) {
         const est = parseEstoque(ws);
         if (est) { model.estoque.push(...est); model.abas.push({ name, tipo: `estoque (${est.length} itens)` }); continue; }
@@ -299,5 +392,15 @@ DB.excel = (function () {
     return parseWorkbook(wb);
   }
 
-  return { fromArrayBuffer, parseWorkbook };
+  /** Lê um arquivo avulso só de cubas (ex.: Valor_da_Cuba.xlsx) */
+  function cubasFromArrayBuffer(buf) {
+    const wb = XLSX.read(buf, { type: 'array', cellDates: false });
+    for (const name of wb.SheetNames) {
+      const cb = parseCubas(wb.Sheets[name]);
+      if (cb) return cb;
+    }
+    return null;
+  }
+
+  return { fromArrayBuffer, parseWorkbook, parseCubas, cubasFromArrayBuffer };
 })();

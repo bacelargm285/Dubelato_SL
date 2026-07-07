@@ -210,3 +210,16 @@ tr:hover td { background: var(--surface-2); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
+
+/* -------- cubas -------- */
+.cuba-toggle { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.cuba-btn {
+  padding: 8px 16px; border-radius: 999px;
+  border: 1px solid var(--line); background: var(--surface);
+  color: var(--tx-2); font: inherit; font-weight: 600; cursor: pointer;
+  transition: var(--transition);
+}
+.cuba-btn:hover { color: var(--tx-1); border-color: var(--amarena); }
+.cuba-btn.active { background: linear-gradient(120deg, rgba(224,71,95,.22), rgba(143,188,127,.18)); color: var(--tx-1); border-color: var(--amarena); }
+.cuba-hint { margin-left: auto; font-size: 12px; }
+@media (max-width: 820px) { .cuba-hint { margin-left: 0; width: 100%; } }

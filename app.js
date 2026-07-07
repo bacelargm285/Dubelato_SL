@@ -8,6 +8,7 @@
   let RAW = null;        // modelo bruto (excel)
   let M = null;          // modelo analítico (finance)
   let INV = null;        // estoque
+  let CUBAS = null;      // custos de produção
   let ALERTAS = [];
   let mesFiltro = 'atual';   // 'atual' | '2026-03' | 'todos'
   let tortelliInvest = localStorage.getItem('db_tortelli') === '1';
@@ -81,6 +82,7 @@
   function rebuild() {
     M = DB.finance.build(RAW, { tortelliComoInvestimento: tortelliInvest, hoje: new Date() });
     INV = RAW.estoque.length ? DB.inventory.build(RAW.estoque) : null;
+    CUBAS = DB.cubas.build(RAW.cubas);
     ALERTAS = DB.alerts.run(M, INV);
     montarFiltroMes();
     atualizarBadgeAlertas();
@@ -162,7 +164,7 @@
       const fn = {
         dashboard: viewDashboard, fluxo: viewFluxo, entradas: () => viewLancamentos('Entrada'),
         saidas: () => viewLancamentos('Saída'), boletos: viewBoletos, estoque: viewEstoque,
-        ifood: viewIfood, funcionarios: viewFuncionarios, marketing: viewMarketing,
+        ifood: viewIfood, funcionarios: viewFuncionarios, marketing: viewMarketing, cubas: viewCubas,
         comparativos: viewComparativos, consultoria: viewConsultoria, alertas: viewAlertas, config: viewConfig,
       }[viewAtual] || viewDashboard;
       main.innerHTML = '';
@@ -486,6 +488,116 @@
       { label: 'Receita', data: meses.map(k => M.byMonth[k].receita), color: p.pistache },
       { label: 'Saídas', data: meses.map(k => M.byMonth[k].saidas), color: p.amarena },
       { label: 'Saldo', data: meses.map(k => M.byMonth[k].saldo), color: p.gold },
+    ]);
+  }
+
+  /* ---------- CUBAS & SABORES ---------- */
+
+  let cubaMl = 8000;        // cuba selecionada (4000 | 8000)
+  let cubaSabor = null;     // sabor selecionado p/ tabela de produtos
+
+  function viewCubas(main) {
+    if (!CUBAS) {
+      main.innerHTML = card('Cubas & Sabores', `
+        <p class="note">A aba <strong>Valor_Cuba</strong> não foi encontrada na planilha carregada.</p>
+        <p class="note">Você pode: (a) copiar a aba Valor_Cuba para dentro da planilha principal
+        (no Excel: botão direito na aba → <em>Mover ou Copiar</em> → marcar <em>Criar uma cópia</em>), ou
+        (b) carregar o arquivo de cubas separadamente aqui:</p>
+        <button class="side-btn" id="btn-upload-cubas" style="max-width:280px"><i class="bi bi-file-earmark-arrow-up"></i> Carregar Valor_da_Cuba.xlsx</button>`);
+      const inp = document.createElement('input');
+      inp.type = 'file'; inp.accept = '.xlsx'; inp.hidden = true;
+      main.appendChild(inp);
+      $('#btn-upload-cubas').addEventListener('click', () => inp.click());
+      inp.addEventListener('change', e => {
+        const f = e.target.files[0]; if (!f) return;
+        const r = new FileReader();
+        r.onload = ev => {
+          const cb = DB.excel.cubasFromArrayBuffer(ev.target.result);
+          if (!cb) { alert('Não encontrei a estrutura de receitas nesse arquivo.'); return; }
+          RAW.cubas = cb; CUBAS = DB.cubas.build(cb); render();
+        };
+        r.readAsArrayBuffer(f);
+      });
+      return;
+    }
+
+    const sel = ml => ml === cubaMl ? 'active' : '';
+    if (!cubaSabor || !CUBAS.porSabor.some(s => s.sabor === cubaSabor && (cubaMl === 8000 ? s.c8000 : s.c4000).completo)) {
+      cubaSabor = (CUBAS.completos[0] || CUBAS.porSabor[0])?.sabor || null;
+    }
+
+    // cards por sabor (sem expor a receita — só custos agregados)
+    const cardsSabores = CUBAS.porSabor.map(s => {
+      const c = cubaMl === 8000 ? s.c8000 : s.c4000;
+      if (!c.completo) {
+        return `<div class="kpi kpi-warn">
+          <div class="kpi-top"><span class="kpi-icon"><i class="bi bi-question-circle"></i></span></div>
+          <div class="kpi-valor dim">incompleto</div>
+          <div class="kpi-label">${U.esc(s.sabor)}<span class="kpi-sub">falta preço: ${c.faltantes.map(U.esc).join(', ')}</span></div>
+        </div>`;
+      }
+      return `<div class="kpi">
+        <div class="kpi-top"><span class="kpi-icon"><i class="bi bi-cup-straw"></i></span>
+          <span class="kpi-delta pos">${U.brl(c.custoPorKg)}/kg</span></div>
+        <div class="kpi-valor">${U.brl(c.custoTotal)}</div>
+        <div class="kpi-label">${U.esc(s.sabor)}<span class="kpi-sub">${(c.pesoTotalG / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 2 })} kg · mescla ${U.brl(c.custoMescla)}</span></div>
+      </div>`;
+    }).join('');
+
+    // tabela de produtos vendidos para o sabor selecionado
+    const saborObj = CUBAS.porSabor.find(s => s.sabor === cubaSabor);
+    const prods = saborObj ? CUBAS.produtosDoSabor(saborObj, cubaMl) : null;
+    const rowsProd = prods ? prods.map(p => `
+      <tr>
+        <td>${U.esc(p.nome)}</td>
+        <td class="mono">${p.gramas} g</td>
+        <td class="mono">${U.brl(p.custo)}</td>
+        <td class="mono">${U.brl(p.preco)}</td>
+        <td class="mono pos">${U.brl(p.margem)}</td>
+        <td class="mono">${U.pct(p.margemPct)} <span class="dim">(CMV ${U.pct(p.cmvPct)})</span></td>
+      </tr>`).join('') : '';
+
+    const opcoesSabor = CUBAS.porSabor
+      .filter(s => (cubaMl === 8000 ? s.c8000 : s.c4000).completo)
+      .map(s => `<option ${s.sabor === cubaSabor ? 'selected' : ''}>${U.esc(s.sabor)}</option>`).join('');
+
+    const pend = CUBAS.incompletos.length ? card('Preços pendentes na planilha', `
+      <p class="note">Para calcular estes sabores, lance o preço da matéria-prima na tabela de valores da aba <strong>Valor_Cuba</strong> (colunas de preço e peso da embalagem):</p>
+      <ul class="note-list">${CUBAS.incompletos.map(s =>
+        `<li><strong>${U.esc(s.sabor)}</strong>: falta ${s.c4000.faltantes.map(U.esc).join(', ')}</li>`).join('')}</ul>`) : '';
+
+    main.innerHTML = `
+      ${card('Custo de produção por cuba', `
+        <div class="cuba-toggle">
+          <button class="cuba-btn ${sel(4000)}" data-ml="4000">Cuba 4.000 ml</button>
+          <button class="cuba-btn ${sel(8000)}" data-ml="8000">Cuba 8.000 ml</button>
+          <span class="dim cuba-hint">mescla (cobertura) tem a mesma quantidade nas duas cubas</span>
+        </div>
+        <div class="kpi-grid" style="margin-top:14px">${cardsSabores}</div>`)}
+      ${card('Custo por cuba — comparativo dos sabores', '<div class="chart-box tall"><canvas id="ch-cubas"></canvas></div>')}
+      ${card('Rentabilidade dos produtos vendidos', `
+        <div class="cuba-toggle" style="margin-bottom:14px">
+          <label class="dim" style="margin-right:8px">Sabor:</label>
+          <select id="sel-sabor" class="input" style="max-width:280px">${opcoesSabor}</select>
+        </div>
+        ${prods ? `<div class="table-wrap"><table>
+          <thead><tr><th>Produto</th><th>Gelato</th><th>Custo do gelato</th><th>Preço de venda</th><th>Margem</th><th>Margem %</th></tr></thead>
+          <tbody>${rowsProd}</tbody></table></div>
+          <p class="note">Custo do gelato = gramas do produto × custo/kg do sabor (cuba de ${cubaMl.toLocaleString('pt-BR')} ml). Não inclui casquinha/copo/colher — quando quiser, adicionamos esses custos de embalagem por produto.</p>`
+          : '<p class="note">Nenhum sabor com custo completo para calcular.</p>'}`)}
+      ${pend}`;
+
+    // interações
+    $$('.cuba-btn').forEach(b => b.addEventListener('click', () => { cubaMl = +b.dataset.ml; render(); }));
+    const selS = $('#sel-sabor');
+    if (selS) selS.addEventListener('change', () => { cubaSabor = selS.value; render(); });
+
+    // gráfico comparativo
+    const comp = CUBAS.porSabor.filter(s => s.c4000.completo);
+    const p = DB.charts.palette();
+    DB.charts.barras('ch-cubas', comp.map(s => s.sabor), [
+      { label: 'Cuba 4.000 ml', data: comp.map(s => s.c4000.custoTotal), color: p.pistache },
+      { label: 'Cuba 8.000 ml', data: comp.map(s => s.c8000.custoTotal), color: p.amarena },
     ]);
   }
 
