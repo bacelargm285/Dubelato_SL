@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="pt-BR" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Dubelato · Inteligência Financeira</title>
+  <meta name="description" content="Dashboard executivo da gelateria Dubelato — planilha Excel transformada em centro de inteligência financeira.">
+  <meta name="theme-color" content="#14100d">
+
+  <!-- Fontes -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+  <!-- Ícones -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+
+  <!-- Bibliotecas -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+
+  <!-- Estilos -->
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/dashboard.css">
+  <link rel="stylesheet" href="css/responsive.css">
+
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='40' r='32' fill='%23e0475f'/><path d='M30 62 L50 95 L70 62 Z' fill='%23d9a84e'/></svg>">
+</head>
+<body>
+
+  <!-- SPLASH / UPLOAD -->
+  <div id="splash">
+    <div class="splash-card">
+      <div class="logo-scoop" aria-hidden="true"></div>
+      <h1>Dubelato</h1>
+      <p class="sub">Centro de Inteligência Financeira</p>
+      <div id="drop-zone" role="button" tabindex="0" aria-label="Carregar planilha Excel">
+        <i class="bi bi-file-earmark-spreadsheet"></i>
+        <strong>Arraste a planilha aqui</strong><br>
+        ou toque para escolher o arquivo (.xlsx)
+      </div>
+      <p class="splash-hint">Tudo roda no seu navegador — a planilha não é enviada para nenhum servidor.<br>
+      Dica: no GitHub Pages, salve como <code>data/Controle_Financeiro_Dubelato.xlsx</code> para carregar sozinho.</p>
+    </div>
+  </div>
+
+  <input type="file" id="file-input" accept=".xlsx,.xlsm,.xls" hidden>
+
+  <!-- APP -->
+  <div id="app" class="hidden">
+
+    <aside id="sidebar">
+      <div class="brand">
+        <div class="logo-scoop" aria-hidden="true"></div>
+        <h1>Dubelato<span class="tag">Inteligência Financeira</span></h1>
+      </div>
+
+      <nav class="nav" aria-label="Menu principal">
+        <button class="nav-item active" data-view="dashboard"><i class="bi bi-grid-1x2"></i> Dashboard</button>
+        <button class="nav-item" data-view="fluxo"><i class="bi bi-water"></i> Fluxo de Caixa</button>
+
+        <span class="nav-sep">Movimentações</span>
+        <button class="nav-item" data-view="entradas"><i class="bi bi-arrow-down-circle"></i> Entradas</button>
+        <button class="nav-item" data-view="saidas"><i class="bi bi-arrow-up-circle"></i> Saídas</button>
+        <button class="nav-item" data-view="boletos"><i class="bi bi-receipt"></i> Boletos</button>
+        <button class="nav-item" data-view="estoque"><i class="bi bi-box-seam"></i> Estoque</button>
+
+        <span class="nav-sep">Canais e times</span>
+        <button class="nav-item" data-view="ifood"><i class="bi bi-phone"></i> iFood</button>
+        <button class="nav-item" data-view="funcionarios"><i class="bi bi-people"></i> Funcionários</button>
+        <button class="nav-item" data-view="marketing"><i class="bi bi-megaphone"></i> Marketing</button>
+
+        <span class="nav-sep">Inteligência</span>
+        <button class="nav-item" data-view="comparativos"><i class="bi bi-bar-chart-line"></i> Comparativos</button>
+        <button class="nav-item" data-view="consultoria"><i class="bi bi-stars"></i> Consultoria</button>
+        <button class="nav-item" data-view="alertas"><i class="bi bi-bell"></i> Alertas <span id="badge-alertas" class="nav-badge hidden">0</span></button>
+        <button class="nav-item" data-view="config"><i class="bi bi-gear"></i> Configurações</button>
+      </nav>
+
+      <div class="side-foot">
+        <label class="switch-row">
+          <span class="switch"><input type="checkbox" id="toggle-tortelli"><span class="track"></span></span>
+          Tortelli como investimento
+        </label>
+        <button class="side-btn" id="btn-upload-side"><i class="bi bi-file-earmark-arrow-up"></i> Planilha</button>
+        <span id="file-name"></span>
+      </div>
+    </aside>
+
+    <div id="backdrop"></div>
+
+    <div id="main">
+      <header id="topbar">
+        <button class="top-btn" id="btn-menu" aria-label="Abrir menu"><i class="bi bi-list"></i></button>
+        <span class="top-title">Painel executivo</span>
+        <select id="filtro-mes" class="input" aria-label="Filtrar por mês"></select>
+        <button class="top-btn" id="btn-print" aria-label="Imprimir ou salvar PDF" title="Imprimir / PDF"><i class="bi bi-printer"></i></button>
+        <button class="top-btn" id="btn-theme" aria-label="Alternar tema claro e escuro" title="Tema"><i class="bi bi-circle-half"></i></button>
+      </header>
+
+      <main id="main-content"></main>
+    </div>
+  </div>
+
+  <!-- Módulos -->
+  <script src="js/utils.js"></script>
+  <script src="js/excel.js"></script>
+  <script src="js/finance.js"></script>
+  <script src="js/inventory.js"></script>
+  <script src="js/analytics.js"></script>
+  <script src="js/alerts.js"></script>
+  <script src="js/charts.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
