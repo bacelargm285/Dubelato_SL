@@ -1,212 +1,136 @@
 /* ============================================================
-   Dubelato BI — dashboard.css
-   Layout do app: sidebar, topbar, grids, KPI cards, tabelas,
-   alertas, gráficos.
+   Dubelato BI — analytics.js
+   Consultoria Financeira: gera o resumo executivo e insights
+   em texto a partir dos números (motor de regras local — roda
+   100% no navegador, sem enviar dados para fora).
    ============================================================ */
+window.DB = window.DB || {};
 
-#app { display: flex; min-height: 100vh; }
+DB.analytics = (function () {
+  const U = DB.utils;
 
-/* -------- sidebar -------- */
-#sidebar {
-  width: var(--sidebar-w);
-  position: fixed;
-  inset: 0 auto 0 0;
-  z-index: 40;
-  display: flex;
-  flex-direction: column;
-  padding: 20px 14px;
-  background: var(--glass);
-  backdrop-filter: blur(20px);
-  border-right: 1px solid var(--line);
-}
-.brand { display: flex; align-items: center; gap: 12px; padding: 4px 8px 18px; }
-.brand .logo-scoop { width: 36px; height: 36px; margin: 0; }
-.brand .logo-scoop::after { border-left-width: 8px; border-right-width: 8px; border-top-width: 10px; bottom: -8px; }
-.brand h1 { font-size: 19px; margin: 0; }
-.brand .tag { display: block; font-family: 'Inter'; font-size: 10.5px; letter-spacing: .14em; text-transform: uppercase; color: var(--tx-3); }
+  function insights(model, inv) {
+    const out = [];
+    const { cur, prev, kpi, proj, byMonth, meses } = model;
+    if (!cur) return out;
 
-.nav { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
-.nav-sep { font-size: 10.5px; letter-spacing: .12em; text-transform: uppercase; color: var(--tx-3); padding: 14px 12px 6px; }
-.nav-item {
-  display: flex; align-items: center; gap: 11px;
-  padding: 9px 12px;
-  border: 0; border-radius: 11px;
-  background: transparent;
-  color: var(--tx-2);
-  font: inherit; font-weight: 500;
-  cursor: pointer; text-align: left;
-  transition: var(--transition);
-  position: relative;
-}
-.nav-item i { font-size: 15px; width: 18px; }
-.nav-item:hover { background: var(--surface); color: var(--tx-1); }
-.nav-item.active { background: linear-gradient(120deg, rgba(224,71,95,.16), rgba(143,188,127,.12)); color: var(--tx-1); }
-.nav-item.active::before {
-  content: ''; position: absolute; left: 0; top: 22%; bottom: 22%;
-  width: 3px; border-radius: 3px; background: var(--amarena);
-}
-.nav-badge {
-  margin-left: auto;
-  background: var(--amarena); color: #fff;
-  font-size: 11px; font-weight: 600;
-  border-radius: 999px; padding: 1px 7px;
-}
+    const push = (tipo, texto) => out.push({ tipo, texto });
 
-.side-foot { border-top: 1px solid var(--line); padding-top: 12px; display: flex; flex-direction: column; gap: 8px; }
-.side-btn {
-  display: flex; align-items: center; gap: 10px;
-  padding: 9px 12px; border-radius: 11px;
-  border: 1px solid var(--line);
-  background: var(--surface);
-  color: var(--tx-2); font: inherit; cursor: pointer;
-  transition: var(--transition);
-}
-.side-btn:hover { color: var(--tx-1); border-color: var(--amarena); }
-#file-name { font-size: 11px; color: var(--tx-3); padding: 0 4px; word-break: break-all; }
+    // Receita e ritmo
+    if (prev && cur.vendaMediaDia && prev.vendaMediaDia) {
+      const d = U.delta(cur.vendaMediaDia, prev.vendaMediaDia);
+      push(d >= 0 ? 'ok' : 'warn',
+        `A venda média diária de ${U.ymLabelFull(cur.mes)} está em ${U.brl(cur.vendaMediaDia)}, ` +
+        `${d >= 0 ? 'alta' : 'queda'} de ${U.pct(Math.abs(d))} sobre ${U.ymLabel(prev.mes)} (${U.brl(prev.vendaMediaDia)}).`);
+    }
 
-.switch-row { display: flex; align-items: center; gap: 10px; padding: 4px 4px 0; font-size: 12.5px; color: var(--tx-2); }
-.switch { position: relative; width: 34px; height: 20px; flex: none; }
-.switch input { opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; position: absolute; z-index: 2; }
-.switch .track { position: absolute; inset: 0; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--line); transition: var(--transition); }
-.switch .track::after { content: ''; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--tx-2); transition: var(--transition); }
-.switch input:checked + .track { background: rgba(224,71,95,.35); border-color: var(--amarena); }
-.switch input:checked + .track::after { transform: translateX(14px); background: var(--amarena); }
+    // CMV
+    if (cur.cmvPct != null) {
+      const alvoTxt = 'referência saudável: 25–35% para gelateria';
+      if (prev && prev.cmvPct != null) {
+        const dif = cur.cmvPct - prev.cmvPct;
+        push(Math.abs(dif) < 2 ? 'info' : dif > 0 ? 'warn' : 'ok',
+          `O CMV está em ${U.pct(cur.cmvPct)} da receita (${dif >= 0 ? '+' : ''}${U.pct(dif)} vs mês anterior; ${alvoTxt}).`);
+      } else {
+        push('info', `O CMV está em ${U.pct(cur.cmvPct)} da receita (${alvoTxt}).`);
+      }
+    }
 
-#backdrop { position: fixed; inset: 0; z-index: 30; background: rgba(0,0,0,.45); opacity: 0; pointer-events: none; transition: opacity var(--transition); }
+    // iFood vs balcão
+    const fat = cur.vendasBalcao + cur.vendasIfood;
+    if (fat > 0 && cur.vendasIfood > 0) {
+      const share = (cur.vendasIfood / fat) * 100;
+      const custoPct = cur.vendasIfood ? (cur.custoIfood / cur.vendasIfood) * 100 : 0;
+      push(custoPct > 25 ? 'warn' : 'info',
+        `O iFood representa ${U.pct(share)} do faturamento. Os custos diretos do canal (motoboy/taxas lançadas) consomem ` +
+        `${U.pct(custoPct)} da receita iFood — o balcão segue mais rentável por não ter esses custos.`);
+    }
 
-/* -------- área principal -------- */
-#main { flex: 1; margin-left: var(--sidebar-w); display: flex; flex-direction: column; min-width: 0; }
+    // Folha
+    if (cur.folhaPct != null && cur.folhaPct > 0) {
+      push(cur.folhaPct > 30 ? 'warn' : 'info',
+        `A folha (salários + freelancers) pesa ${U.pct(cur.folhaPct)} do faturamento de ${U.ymLabel(cur.mes)} (${U.brl(cur.folha)}).`);
+    }
 
-#topbar {
-  position: sticky; top: 0; z-index: 20;
-  display: flex; align-items: center; gap: 12px;
-  padding: 14px 26px;
-  background: var(--glass);
-  backdrop-filter: blur(18px);
-  border-bottom: 1px solid var(--line);
-}
-#btn-menu { display: none; }
-.top-title { font-size: 16px; font-weight: 600; margin-right: auto; font-family: 'Fraunces', serif; }
-.top-btn {
-  width: 38px; height: 38px; flex: none;
-  display: grid; place-items: center;
-  border-radius: 11px; border: 1px solid var(--line);
-  background: var(--surface); color: var(--tx-2);
-  cursor: pointer; font-size: 15px;
-  transition: var(--transition);
-}
-.top-btn:hover { color: var(--tx-1); border-color: var(--amarena); }
-#filtro-mes { width: auto; min-width: 150px; }
+    // Marketing ROI aproximado
+    if (prev && cur.marketing > 0) {
+      const deltaRec = (cur.receita - prev.receita);
+      const roi = ((deltaRec - cur.marketing) / cur.marketing) * 100;
+      push(roi >= 0 ? 'ok' : 'warn',
+        `Marketing: ${U.brl(cur.marketing)} investidos no mês. A variação de receita vs mês anterior foi ${U.brl(deltaRec)} ` +
+        `(ROI aproximado de ${U.pct(roi)} — leitura indicativa, o mês pode estar incompleto).`);
+    }
 
-#main-content { padding: 24px 26px 60px; display: flex; flex-direction: column; gap: 18px; max-width: 1480px; width: 100%; margin: 0 auto; }
+    // Capital de giro e reserva
+    if (kpi.capitalGiroMeses != null) {
+      const f = DB.finance.nivel(kpi.capitalGiroMeses, DB.finance.FAIXAS_MESES);
+      push(f.cls === 'ok' || f.cls === 'good' ? 'ok' : 'warn',
+        `O capital de giro (caixa − boletos futuros) é de ${U.brl(kpi.capitalGiro)} e cobre ${kpi.capitalGiroMeses.toFixed(1)} ` +
+        `mês(es) de custos fixos + folha — nível ${f.label.toLowerCase()}.`);
+    }
 
-/* -------- KPI cards -------- */
-.kpi-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(215px, 1fr)); gap: 14px; }
-.kpi-grid-4 { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
-.kpi {
-  background: var(--surface);
-  backdrop-filter: blur(14px);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  padding: 16px 18px;
-  transition: transform var(--transition), border-color var(--transition);
-  opacity: 0;
-}
-.kpi:hover { transform: translateY(-3px); border-color: rgba(224,71,95,.4); }
-.kpi-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
-.kpi-icon {
-  width: 34px; height: 34px; display: grid; place-items: center;
-  border-radius: 10px; font-size: 15px;
-  background: linear-gradient(135deg, rgba(224,71,95,.18), rgba(143,188,127,.15));
-  color: var(--amarena);
-}
-.kpi-delta { font-size: 12px; font-weight: 600; display: inline-flex; gap: 3px; align-items: center; padding: 2px 8px; border-radius: 999px; }
-.kpi-delta.pos { color: var(--pos); background: rgba(140,200,120,.12); }
-.kpi-delta.neg { color: var(--neg); background: rgba(230,90,110,.12); }
-.kpi-valor { font-size: 21px; font-weight: 650; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
-.kpi-label { color: var(--tx-2); font-size: 12.5px; margin-top: 3px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-.kpi-sub { color: var(--tx-3); }
-.kpi-bad { border-color: rgba(230,90,110,.45); }
-.kpi-warn { border-color: rgba(230,181,102,.5); }
+    // Projeção
+    if (proj.primeiroNegativo != null) {
+      push('bad', `No ritmo dos últimos 30 dias, o fluxo de caixa ficará negativo em aproximadamente ${proj.primeiroNegativo} dias. ` +
+        `Antecipe renegociação de boletos ou reforço de receita.`);
+    } else if (proj.netDia < 0) {
+      push('warn', `A operação está consumindo em média ${U.brl(Math.abs(proj.netDia))}/dia de caixa. O saldo atual sustenta ~${proj.diasDeCaixa} dias nesse ritmo — sem déficit no horizonte de 90 dias, mas vale acompanhar.`);
+    } else {
+      push('ok', `A projeção de 90 dias não indica caixa negativo no ritmo atual (${U.brl(proj.netDia)}/dia líquidos).`);
+    }
 
-/* -------- cards genéricos -------- */
-.card {
-  background: var(--surface);
-  backdrop-filter: blur(14px);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
-  opacity: 0;
-}
-.card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 16px 20px 0; }
-.card-head h2 { font-size: 16px; margin: 0; }
-.card-body { padding: 16px 20px 20px; }
-.enter { animation: rise .45s ease both; }
+    // Maior crescimento de despesa por categoria
+    if (prev) {
+      let pior = null;
+      for (const [cat, v] of Object.entries(cur.cats)) {
+        const antes = prev.cats[cat]?.sai || 0;
+        if (v.sai > 300 && antes > 0) {
+          const d = v.sai - antes;
+          if (!pior || d > pior.d) pior = { cat, d, de: antes, para: v.sai };
+        }
+      }
+      if (pior && pior.d > 200) {
+        push('warn', `A categoria de despesa que mais cresceu foi "${pior.cat}": ${U.brl(pior.de)} → ${U.brl(pior.para)} (+${U.brl(pior.d)}).`);
+      }
+    }
 
-.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+    // Estoque
+    if (inv && (inv.zerados.length || inv.baixos.length)) {
+      push('warn', `Estoque: ${inv.zerados.length} item(ns) zerado(s) e ${inv.baixos.length} com nível baixo. ` +
+        `Priorize reposição de itens de produção para não travar vendas.`);
+    }
 
-.chart-box { position: relative; height: 300px; }
-.chart-box.tall { height: 360px; }
+    return out;
+  }
 
-/* -------- tabelas -------- */
-.table-wrap { overflow-x: auto; }
-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
-th { text-align: left; color: var(--tx-3); font-weight: 500; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; padding: 8px 10px; border-bottom: 1px solid var(--line); }
-th.right { text-align: right; }
-td { padding: 9px 10px; border-bottom: 1px solid var(--grid); vertical-align: top; }
-td.right, td.mono:last-child { text-align: right; }
-tr:hover td { background: var(--surface-2); }
-.empty { color: var(--tx-3); text-align: center; padding: 22px; }
+  /** Resumo executivo em parágrafos, como um consultor escreveria */
+  function resumoExecutivo(model, inv) {
+    const { cur, prev, kpi, proj } = model;
+    if (!cur) return 'Sem dados suficientes para gerar o resumo.';
+    const p = [];
 
-.chip { display: inline-block; background: var(--surface-2); border-radius: 999px; padding: 2px 9px; font-size: 11.5px; color: var(--tx-2); }
-.badge { display: inline-block; border-radius: 999px; padding: 2px 9px; font-size: 11.5px; font-weight: 600; background: var(--surface-2); color: var(--tx-2); }
-.badge.ok { background: rgba(140,200,120,.14); color: var(--pos); }
-.badge.good { background: rgba(140,200,120,.1); color: var(--pos); }
-.badge.warn { background: rgba(230,181,102,.15); color: var(--warn); }
-.badge.bad { background: rgba(230,90,110,.15); color: var(--neg); }
+    p.push(`Em ${U.ymLabelFull(cur.mes)}, a Dubelato faturou ${U.brl(cur.receita)} ` +
+      `(${U.brl(cur.vendasBalcao)} no balcão e ${U.brl(cur.vendasIfood)} no iFood), com saídas totais de ${U.brl(cur.saidas)} ` +
+      `e resultado de caixa de ${U.brl(cur.saldo)} no mês. O saldo acumulado da operação está em ${U.brl(kpi.saldoAtual)}.`);
 
-/* -------- alertas -------- */
-.alerta-list { display: flex; flex-direction: column; gap: 10px; }
-.alerta {
-  display: flex; gap: 13px; align-items: flex-start;
-  border: 1px solid var(--line);
-  border-left-width: 3px;
-  border-radius: var(--radius-sm);
-  padding: 13px 15px;
-  background: var(--surface);
-}
-.alerta i { font-size: 17px; margin-top: 1px; }
-.alerta strong { display: block; font-size: 13.5px; margin-bottom: 2px; }
-.alerta p { margin: 0; color: var(--tx-2); font-size: 13px; }
-.alerta.bad { border-left-color: var(--neg); } .alerta.bad i { color: var(--neg); }
-.alerta.warn { border-left-color: var(--warn); } .alerta.warn i { color: var(--warn); }
-.alerta.ok { border-left-color: var(--pos); } .alerta.ok i { color: var(--pos); }
-.alerta.info { border-left-color: var(--blue); } .alerta.info i { color: var(--blue); }
+    const partes = [];
+    if (cur.cmvPct != null) partes.push(`o CMV consome ${U.pct(cur.cmvPct)} da receita`);
+    if (cur.folhaPct != null && cur.folha > 0) partes.push(`a folha pesa ${U.pct(cur.folhaPct)}`);
+    if (cur.fixos > 0) partes.push(`os custos fixos somam ${U.brl(cur.fixos)}`);
+    if (partes.length) p.push(`Na estrutura de custos, ${partes.join(', ')}. ` +
+      (kpi.pontoEquilibrio ? `O ponto de equilíbrio estimado é de ${U.brl(kpi.pontoEquilibrio)} por mês — abaixo disso a operação fica no prejuízo.` : ''));
 
-/* -------- consultoria -------- */
-.resumo p { margin: 0 0 12px; color: var(--tx-1); font-size: 14.5px; line-height: 1.65; }
-.note { color: var(--tx-2); font-size: 13px; margin: 0; line-height: 1.6; }
-.note-list { margin: 0; padding-left: 18px; color: var(--tx-2); font-size: 13px; display: flex; flex-direction: column; gap: 8px; }
-.busca { margin-bottom: 14px; max-width: 380px; }
+    if (kpi.capitalGiroMeses != null && kpi.reservaMeses != null) {
+      p.push(`O capital de giro cobre ${kpi.capitalGiroMeses.toFixed(1)} mês(es) e a reserva equivale a ${kpi.reservaMeses.toFixed(1)} mês(es) ` +
+        `de custos fixos + folha (média de ${U.brl(kpi.custoFixoMedio)}/mês). Há ${U.brl(kpi.totalBoletosFuturos)} em boletos a vencer.`);
+    }
 
-/* -------- skeleton -------- */
-.skeleton-wrap { display: grid; gap: 16px; }
-.skeleton {
-  height: 110px; border-radius: var(--radius);
-  background: linear-gradient(100deg, var(--surface) 40%, var(--surface-2) 50%, var(--surface) 60%);
-  background-size: 200% 100%;
-  animation: shimmer 1.1s infinite linear;
-}
-@keyframes shimmer { to { background-position: -200% 0; } }
+    p.push(proj.primeiroNegativo != null
+      ? `Atenção: mantido o ritmo dos últimos 30 dias, o caixa fica negativo em ~${proj.primeiroNegativo} dias. Recomenda-se revisar prazos de boletos e reforçar vendas de maior margem (balcão).`
+      : `Mantido o ritmo atual (${U.brl(proj.netDia)}/dia líquidos), o caixa permanece positivo no horizonte de 90 dias.`);
 
-/* -------- impressão -------- */
-@media print {
-  #sidebar, #topbar, #backdrop { display: none !important; }
-  #main { margin: 0; }
-  body { background: #fff; }
-  .card, .kpi { box-shadow: none; break-inside: avoid; opacity: 1 !important; }
-}
+    return p;
+  }
 
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
-}
+  return { insights, resumoExecutivo };
+})();
