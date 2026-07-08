@@ -1254,7 +1254,7 @@
     const rowsPrev = PD.map(p => {
       const nomes = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
       const ctxBadge = p.ctx.contexto === 'normal'
-        ? (DB.calendario.ehFeriasEscolares(p.data) ? '<span class="chip">férias escolares</span>' : '<span class="dim">—</span>')
+        ? '<span class="dim">—</span>'
         : `<span class="badge ${p.ctx.contexto === 'feriadao' ? 'ok' : 'good'}">${U.esc(p.ctx.nome || DB.calendario.ROTULOS[p.ctx.contexto])}</span>`;
       return `<tr>
         <td><strong>${nomes[p.data.getDay()]}</strong> <span class="dim">${U.fmtDate(p.data)}</span></td>
@@ -1279,9 +1279,9 @@
           <tbody>${A.contextos.map(c => `<tr>
             <td><strong>${c.rotulo}</strong></td>
             <td class="mono right">${c.dias}</td>
-            <td class="mono right">${c.fator == null ? '<span class="dim">poucos dias — neutro</span>' : `<span class="badge ${c.fator >= 1.1 ? 'ok' : c.fator <= 0.9 ? 'bad' : ''}">${c.fator >= 1 ? '+' : '−'}${U.pct(Math.abs(c.fator - 1) * 100)}</span>`}</td>
+            <td class="mono right"><span class="badge ${c.fator >= 1.1 ? 'ok' : c.fator <= 0.9 ? 'bad' : ''}">${c.fator >= 1 ? '+' : '−'}${U.pct(Math.abs(c.fator - 1) * 100)}</span>${c.dias < 8 ? ' <span class="dim">amostra pequena — amortecido</span>' : ''}</td>
           </tr>`).join('')}</tbody></table></div>
-        <p class="note">Efeito já descontando dia da semana e temperatura — ou seja, é o "extra" que o calendário traz. Medido no seu histórico de vendas, não em tabela genérica.</p>`)}
+        <p class="note">Efeito já descontando dia da semana e temperatura. Verão (15/dez–jan) e férias de julho são contextos separados — o movimento de dezembro não infla a previsão de julho. Contextos com poucos dias são amortecidos para o neutro até acumular histórico.</p>`)}
       <div class="grid-2">
         ${card('Venda média por faixa de temperatura', '<div class="chart-box"><canvas id="ch-cl-faixa"></canvas></div>')}
         ${card('Cada dia: temperatura × venda', '<div class="chart-box"><canvas id="ch-cl-scatter"></canvas></div>')}

@@ -111,7 +111,13 @@ DB.clima = (function () {
 
     const mediaGeral = U.avg(pontos.map(p => p.venda));
 
-    // faixas de temperatura
+    // ---- LINHA DE BASE LIMPA: dia da semana e temperatura medidos só nos
+    // dias comuns, para alta temporada/feriadão não contaminarem a régua ----
+    const comuns = pontos.filter(p => p.ctx.contexto === 'normal');
+    const basePontos = comuns.length >= 30 ? comuns : pontos;
+    const mediaBase = U.avg(basePontos.map(p => p.venda));
+
+    // faixas de temperatura (exibição: todos os dias; modelo: dias comuns)
     const porFaixa = FAIXAS.map(f => ({ ...f, dias: [], media: null }));
     for (const p of pontos) porFaixa.find(f => f.id === faixaDe(p.tmax).id).dias.push(p);
     for (const f of porFaixa) f.media = f.dias.length ? U.avg(f.dias.map(p => p.venda)) : null;
@@ -125,35 +131,38 @@ DB.clima = (function () {
     // correlação temperatura × venda
     const r = pearson(pontos.map(p => p.tmax), pontos.map(p => p.venda));
 
-    // fatores base: dia da semana e faixa de temperatura
+    // fatores base (dias comuns)
     const fatorDow = Array.from({ length: 7 }, (_, d) => {
-      const ds = pontos.filter(p => p.dow === d);
-      return ds.length >= 3 ? U.avg(ds.map(p => p.venda)) / mediaGeral : 1;
+      const ds = basePontos.filter(p => p.dow === d);
+      return ds.length >= 3 ? U.avg(ds.map(p => p.venda)) / mediaBase : 1;
     });
     const fatorFaixa = {};
-    for (const f of porFaixa) fatorFaixa[f.id] = f.media ? f.media / mediaGeral : 1;
-    const fatorChuva = (mediaChuva && mediaSeco) ? mediaChuva / mediaSeco : 1;
+    for (const f of FAIXAS) {
+      const ds = basePontos.filter(p => faixaDe(p.tmax).id === f.id);
+      fatorFaixa[f.id] = ds.length >= 5 ? U.avg(ds.map(p => p.venda)) / mediaBase : 1;
+    }
+    const fatorChuva = (mediaChuva && mediaSeco) ? Math.min(1, mediaChuva / mediaSeco) : 1;
 
-    // fatores de CALENDÁRIO por resíduo (venda ÷ esperado dow×clima)
+    // fatores de CALENDÁRIO por resíduo (venda ÷ esperado dow×clima), com
+    // amortecimento: poucas amostras puxam o fator para o neutro (1.0) —
+    // fator = (n·média + K·1) / (n + K). Evita otimismo por amostra pequena.
+    const K_SHRINK = 5;
     const residuos = {};
     for (const p of pontos) {
-      const esperado = mediaGeral * fatorDow[p.dow] * (fatorFaixa[faixaDe(p.tmax).id] || 1);
+      const esperado = mediaBase * fatorDow[p.dow] * (fatorFaixa[faixaDe(p.tmax).id] || 1);
       if (esperado <= 0) continue;
       (residuos[p.ctx.contexto] = residuos[p.ctx.contexto] || []).push(p.venda / esperado);
     }
-    const fatorContexto = {}, contextos = [];
+    const fatorContexto = { normal: 1 }, contextos = [];
     for (const ctxId of DB.calendario.ORDEM) {
       const rs = residuos[ctxId] || [];
-      const fator = rs.length >= 4 ? U.avg(rs) : (ctxId === 'normal' ? 1 : null);
-      fatorContexto[ctxId] = fator ?? 1; // sem amostra suficiente → neutro
-      contextos.push({ id: ctxId, rotulo: DB.calendario.ROTULOS[ctxId], dias: rs.length, fator: fator, medido: rs.length >= 4 });
+      const bruto = rs.length ? U.avg(rs) : 1;
+      const fator = ctxId === 'normal' ? 1 : (rs.length * bruto + K_SHRINK * 1) / (rs.length + K_SHRINK);
+      fatorContexto[ctxId] = fator;
+      contextos.push({ id: ctxId, rotulo: DB.calendario.ROTULOS[ctxId], dias: rs.length, fator, bruto, medido: rs.length >= 4 });
     }
-    // normaliza para o "normal" = 1
-    const base = fatorContexto.normal || 1;
-    for (const k2 of Object.keys(fatorContexto)) fatorContexto[k2] /= base;
-    contextos.forEach(c => { if (c.fator != null) c.fator /= base; });
 
-    return { pontos, mediaGeral, porFaixa, mediaChuva, mediaSeco, nChuvosos: chuvosos.length, nSecos: secos.length, r, fatorDow, fatorFaixa, fatorChuva, fatorContexto, contextos, mapaCal };
+    return { pontos, mediaGeral, mediaBase, porFaixa, mediaChuva, mediaSeco, nChuvosos: chuvosos.length, nSecos: secos.length, r, fatorDow, fatorFaixa, fatorChuva, fatorContexto, contextos, mapaCal };
   }
 
   /** Previsão de demanda: média × dia da semana × temperatura × chuva × calendário */
@@ -161,7 +170,7 @@ DB.clima = (function () {
     return prev.map(p => {
       const fx = faixaDe(p.tmax);
       const ctx = DB.calendario.classificar(p.data, analise.mapaCal);
-      let est = analise.mediaGeral
+      let est = analise.mediaBase
         * analise.fatorDow[p.data.getDay()]
         * (analise.fatorFaixa[fx.id] || 1)
         * (analise.fatorContexto[ctx.contexto] || 1);

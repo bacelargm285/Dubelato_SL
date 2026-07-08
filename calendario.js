@@ -58,11 +58,13 @@ DB.calendario = (function () {
     ];
   }
 
-  /** Férias escolares (aproximação Brasil): janeiro, julho e 15/dez em diante */
-  function ehFeriasEscolares(d) {
+  /** Alta temporada de verão: 15/dez a 31/jan (férias + festas — Natal/Réveillon inclusos) */
+  function ehVeraoFerias(d) {
     const m = d.getMonth();
-    return m === 0 || m === 6 || (m === 11 && d.getDate() >= 15);
+    return m === 0 || (m === 11 && d.getDate() >= 15);
   }
+  /** Férias escolares de inverno: julho */
+  function ehInvernoFerias(d) { return d.getMonth() === 6; }
 
   /** Janela de feriadão: emenda o feriado com o fim de semana vizinho */
   function janelaFeriadao(fer) {
@@ -99,19 +101,28 @@ DB.calendario = (function () {
     return mapa;
   }
 
-  const ORDEM = ['feriadao', 'comemorativa', 'vespera', 'ferias', 'normal'];
+  const ORDEM = ['ferias_verao', 'feriadao', 'comemorativa', 'vespera', 'ferias_inverno', 'normal'];
   const ROTULOS = {
-    feriadao: 'Feriadão', comemorativa: 'Data comemorativa', vespera: 'Véspera de feriado',
-    ferias: 'Férias escolares', normal: 'Dia comum',
+    ferias_verao: 'Férias de verão (15/dez–jan)',
+    feriadao: 'Feriadão (fora do verão)',
+    comemorativa: 'Data comemorativa',
+    vespera: 'Véspera de feriado',
+    ferias_inverno: 'Férias de inverno (julho)',
+    normal: 'Dia comum',
   };
 
-  /** Classifica uma data: contexto + nome (usa o mapa; férias escolares como fallback) */
+  /**
+   * Classifica uma data. O verão (15/dez–jan) tem prioridade sobre tudo:
+   * Natal e Réveillon vendem como alta temporada, não como "feriadão típico" —
+   * assim o fator de feriadão fica limpo para valer o ano inteiro.
+   */
   function classificar(d, mapa) {
+    if (ehVeraoFerias(d)) return { contexto: 'ferias_verao', nome: 'alta temporada de verão' };
     const k = ymd(d);
     if (mapa[k]) return mapa[k];
-    if (ehFeriasEscolares(d)) return { contexto: 'ferias', nome: 'férias escolares' };
+    if (ehInvernoFerias(d)) return { contexto: 'ferias_inverno', nome: 'férias de julho' };
     return { contexto: 'normal', nome: '' };
   }
 
-  return { construirMapa, classificar, feriados, comemorativas, ehFeriasEscolares, pascoa, ORDEM, ROTULOS };
+  return { construirMapa, classificar, feriados, comemorativas, ehVeraoFerias, ehInvernoFerias, pascoa, ORDEM, ROTULOS };
 })();
