@@ -622,7 +622,66 @@
     }).join('');
 
     const custoSemana = totalFreelaDias * esc.diaria;
-    const escalaCard = card('Escala × Movimento — simulador de freelancers', `
+
+    /* --- PLANEJADOR DA SEMANA: previsão de vendas → escala e produção --- */
+    // parâmetros da equipe (persistidos): quadro fixo de Mauricio = 3 atendimento + 1 gerente + 1 produção
+    let eq;
+    try { eq = JSON.parse(localStorage.getItem('db_equipe') || 'null'); } catch { eq = null; }
+    if (!eq) eq = { atendentes: 3, capacidade: 1800, disponiveis: [2, 3, 3, 3, 3, 3, 3] }; // dom..sáb (dom: folga quinzenal)
+
+    let planejador;
+    if (!CLIMA) {
+      planejador = card('Planejador da semana — escala pela previsão de vendas', `
+        <p class="note">Usa a previsão dos próximos 7 dias (dia da semana × clima × calendário turístico) para dizer <strong>em que dia vale contratar freelancer</strong> e quantas cubas produzir.</p>
+        <button class="side-btn" id="btn-clima-fn" style="max-width:300px;margin-top:10px"><i class="bi bi-thermometer-sun"></i> Carregar previsão da semana</button>
+        <span id="clima-status" class="dim" style="margin-left:10px"></span>`);
+    } else {
+      const PD = CLIMA.previsaoDemanda;
+      const NOMES2 = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+      let totFreelas = 0, totCusto = 0;
+      const rowsPlan = PD.map(p => {
+        const dow = p.data.getDay();
+        const necessarios = Math.max(1, Math.ceil(p.estimativa / Math.max(1, eq.capacidade)));
+        const disponiveis = eq.disponiveis[dow];
+        const freelas = Math.max(0, necessarios - disponiveis);
+        const custo = freelas * esc.diaria;
+        totFreelas += freelas; totCusto += custo;
+        const ctxChip = p.ctx.contexto !== 'normal' ? `<span class="chip">${U.esc(p.ctx.nome || p.ctx.contexto)}</span>` : '';
+        return `<tr>
+          <td><strong>${NOMES2[dow]}</strong> <span class="dim">${U.fmtDate(p.data)}</span> ${ctxChip}</td>
+          <td class="mono">${Math.round(p.tmax)}° ${p.chove ? '<i class="bi bi-cloud-rain warn-text"></i>' : ''}</td>
+          <td class="mono right">${U.brl(p.estimativa)}</td>
+          <td class="mono right">${necessarios}</td>
+          <td class="right"><input type="number" min="0" max="6" class="input eq-disp" data-d="${dow}" value="${disponiveis}" style="width:64px;padding:5px 6px;text-align:center"></td>
+          <td class="right">${freelas > 0 ? `<span class="badge warn"><i class="bi bi-person-plus"></i> ${freelas} freela${freelas > 1 ? 's' : ''}</span>` : '<span class="badge ok">equipe dá conta</span>'}</td>
+          <td class="mono right">${freelas ? U.brl(custo) : '—'}</td>
+        </tr>`;
+      }).join('');
+
+      const receitaPrevista = U.sum(PD, p => p.estimativa);
+      // produção sugerida: preço médio por grama dos produtos vendidos → receita por cuba de 8 kg
+      let cubasTxt = '';
+      if (CUBAS && CUBAS.produtos.length) {
+        const precoPorG = U.avg(CUBAS.produtos.map(pr => pr.preco / pr.gramas));
+        const receitaPorCuba = precoPorG * 8000;
+        const cubas = receitaPrevista / receitaPorCuba;
+        cubasTxt = `<p class="note"><strong>Produção sugerida:</strong> ~${Math.ceil(cubas)} cubas de 8 L na semana (receita prevista de ${U.brl(receitaPrevista)} ÷ ~${U.brl(receitaPorCuba)} de venda por cuba). Priorize os 8 fixos e escolha os rotativos pela margem em Custo das Cubas.</p>`;
+      }
+
+      planejador = card('Planejador da semana — escala pela previsão de vendas', `
+        <div class="cuba-toggle" style="margin-bottom:12px">
+          <label class="dim">Venda que 1 atendente dá conta/dia:</label>
+          <input type="number" id="eq-cap" class="input" min="500" step="100" value="${eq.capacidade}" style="width:110px;padding:6px 10px">
+          <span class="dim" style="margin-left:auto">semana prevista: <strong>${U.brl(receitaPrevista)}</strong> · freelancers sugeridos: <strong>${totFreelas}</strong> (${U.brl(totCusto)}${receitaPrevista ? ' = ' + U.pct(totCusto / receitaPrevista * 100) : ''})</span>
+        </div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Dia</th><th>Clima</th><th class="right">Venda prevista</th><th class="right">Atend. necessários</th><th class="right">Fixos no dia</th><th class="right">Reforço</th><th class="right">Custo</th></tr></thead>
+          <tbody>${rowsPlan}</tbody></table></div>
+        ${cubasTxt}
+        <p class="note">Quadro fixo: 3 atendentes + 1 gerente + 1 produção. Ajuste <strong>"Fixos no dia"</strong> conforme as folgas da semana (ex.: domingo de folga quinzenal → 2). Quando você enviar a escala de folgas, esse campo passa a preencher sozinho. "Atendentes necessários" = venda prevista ÷ capacidade por pessoa — calibre a capacidade observando um sábado cheio.</p>`);
+    }
+
+    const escalaCard = card('Escala × Movimento — simulador pela média histórica', `
       <div class="cuba-toggle" style="margin-bottom:12px">
         <label class="dim">Diária média do freelancer:</label>
         <input type="number" id="esc-diaria" class="input" min="0" step="10" value="${esc.diaria}" style="width:110px;padding:6px 10px">
@@ -640,6 +699,7 @@
         ${kpiCard({ icon: 'bi-person-plus', label: 'Freelancers', valor: U.brl(folhaFree) })}
         ${kpiCard({ icon: 'bi-percent', label: 'Peso sobre faturamento', valor: m?.folhaPct != null ? U.pct(m.folhaPct) : '—', invert: true, cls: m && m.folhaPct > 30 ? 'kpi-warn' : '' })}
       </div>
+      ${planejador}
       ${card('Receita média por dia da semana (histórico completo)', '<div class="chart-box"><canvas id="ch-fn-dow"></canvas></div>')}
       ${escalaCard}
       ${card('Folha × faturamento por mês', '<div class="chart-box tall"><canvas id="ch-folha"></canvas></div>')}
@@ -651,6 +711,17 @@
       { label: 'Faturamento', data: meses.map(k => M.byMonth[k].receita), color: p.pistache },
       { label: 'Folha', data: meses.map(k => M.byMonth[k].folha), color: p.purple },
     ]);
+
+    // interações do planejador
+    const salvarEq = () => { localStorage.setItem('db_equipe', JSON.stringify(eq)); render(); };
+    const btnClimaFn = $('#btn-clima-fn');
+    if (btnClimaFn) btnClimaFn.addEventListener('click', carregarClima);
+    const capInp = $('#eq-cap');
+    if (capInp) capInp.addEventListener('change', e => { eq.capacidade = Math.max(500, +e.target.value || 1800); salvarEq(); });
+    $$('.eq-disp').forEach(inp => inp.addEventListener('change', e => {
+      eq.disponiveis[+e.target.dataset.d] = Math.max(0, Math.min(6, +e.target.value || 0));
+      salvarEq();
+    }));
 
     // interações do simulador
     const salvarEsc = () => { localStorage.setItem('db_escala', JSON.stringify(esc)); render(); };
@@ -1303,22 +1374,23 @@
   }
 
   async function carregarClima() {
-    const st = $('#clima-status');
+    const st = $('#clima-status'); // presente na view Clima e no planejador de Funcionários
+    const setSt = t => { if (st) st.textContent = t; };
     try {
-      st.textContent = 'Buscando histórico de clima de São Lourenço…';
+      setSt('Buscando histórico de clima de São Lourenço…');
       const datas = M.txs.filter(t => t.tipo === 'Entrada' && (t.grupo === 'receitaBalcao' || t.grupo === 'receitaIfood')).map(t => t.date);
       const min = new Date(Math.min(...datas)), max = new Date(Math.max(...datas));
       const hoje = new Date(); const limite = new Date(hoje); limite.setDate(limite.getDate() - 2);
       const diasClima = await DB.clima.historico(min, max > limite ? limite : max);
-      st.textContent = 'Analisando e buscando previsão…';
+      setSt('Analisando e buscando previsão…');
       const analise = DB.clima.analisar(M, diasClima);
-      if (!analise) { st.textContent = 'Poucos dias com venda + clima para analisar.'; return; }
+      if (!analise) { setSt('Poucos dias com venda + clima para analisar.'); return; }
       const prev = await DB.clima.previsao7d();
       CLIMA = { analise, previsaoDemanda: DB.clima.preverDemanda(analise, prev) };
       render();
     } catch (err) {
       console.error(err);
-      st.textContent = 'Não foi possível carregar o clima (' + err.message + '). Verifique a internet e tente de novo.';
+      setSt('Não foi possível carregar o clima (' + err.message + '). Verifique a internet e tente de novo.');
     }
   }
 
