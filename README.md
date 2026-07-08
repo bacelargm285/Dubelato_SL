@@ -22,3 +22,24 @@ a planilha direto na tela inicial do site — tudo roda no navegador.
 - style.css, dashboard.css, responsive.css — estilos
 - utils.js, excel.js, finance.js, inventory.js, analytics.js, alerts.js, charts.js, app.js — módulos
 - Controle_Financeiro_Dubelato.xlsx — dados
+
+## Cartões (Getnet)
+
+No menu **Cartões**, arraste os arquivos do portal Getnet — de preferência
+os **CSVs** (extrato_consolidado_cartao, extrato_consolidado_pix e
+AgendaFinanceiraSimplificada; os demais são ignorados). Os PDFs
+equivalentes também funcionam. Obs.: o indicador de cessão da agenda
+só existe no PDF.
+
+Os dados ficam salvos no navegador do aparelho e relatórios de meses
+seguintes são somados sem duplicar. Análises: taxas por bandeira e
+modalidade, ticket médio real, recebíveis por semana, venda por dia da
+semana e cruzamento mensal planilha × maquininha (diferença ≈ dinheiro;
+negativa = possível lançamento faltando).
+
+### Compartilhar dados Getnet com os sócios
+
+Após carregar os CSVs/PDFs, clique em **Baixar arquivo para publicar no
+GitHub** e suba o `getnet_dados.json` gerado na raiz do repositório
+(substituindo o anterior). O site carrega esse arquivo automaticamente
+para qualquer pessoa que abrir o link.

@@ -18,6 +18,8 @@
   <!-- Bibliotecas -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
   <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script>if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';</script>
 
   <!-- Estilos -->
   <link rel="stylesheet" href="style.css">
@@ -68,6 +70,7 @@
         <span class="nav-sep">Canais e times</span>
         <button class="nav-item" data-view="ifood"><i class="bi bi-phone"></i> iFood</button>
         <button class="nav-item" data-view="cubas"><i class="bi bi-cup-straw"></i> Cubas &amp; Sabores</button>
+        <button class="nav-item" data-view="getnet"><i class="bi bi-credit-card"></i> Cartões</button>
         <button class="nav-item" data-view="funcionarios"><i class="bi bi-people"></i> Funcionários</button>
         <button class="nav-item" data-view="marketing"><i class="bi bi-megaphone"></i> Marketing</button>
 
@@ -109,6 +112,7 @@
   <script src="finance.js"></script>
   <script src="inventory.js"></script>
   <script src="cubas.js"></script>
+  <script src="getnet.js"></script>
   <script src="analytics.js"></script>
   <script src="alerts.js"></script>
   <script src="charts.js"></script>

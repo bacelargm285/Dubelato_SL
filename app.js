@@ -9,6 +9,8 @@
   let M = null;          // modelo analítico (finance)
   let INV = null;        // estoque
   let CUBAS = null;      // custos de produção
+  let GETNET = null;     // dados da maquininha (localStorage)
+  let GAN = null;        // análise getnet
   let ALERTAS = [];
   let mesFiltro = 'atual';   // 'atual' | '2026-03' | 'todos'
   let tortelliInvest = localStorage.getItem('db_tortelli') === '1';
@@ -83,6 +85,16 @@
     M = DB.finance.build(RAW, { tortelliComoInvestimento: tortelliInvest, hoje: new Date() });
     INV = RAW.estoque.length ? DB.inventory.build(RAW.estoque) : null;
     CUBAS = DB.cubas.build(RAW.cubas);
+    GETNET = DB.getnet.carregar();
+    GAN = GETNET ? DB.getnet.analisar(GETNET, M) : null;
+    // busca a versão publicada no repositório (visível para todos os sócios)
+    DB.getnet.carregarPublicado().then(pub => {
+      if (!pub) return;
+      const localMaisNovo = GETNET?.atualizadoEm && pub.atualizadoEm && GETNET.atualizadoEm > pub.atualizadoEm;
+      GETNET = localMaisNovo ? DB.getnet.mesclar(pub, GETNET) : (GETNET ? DB.getnet.mesclar(GETNET, pub) : pub);
+      GAN = DB.getnet.analisar(GETNET, M);
+      if (viewAtual === 'getnet') render();
+    });
     ALERTAS = DB.alerts.run(M, INV);
     montarFiltroMes();
     atualizarBadgeAlertas();
@@ -164,7 +176,7 @@
       const fn = {
         dashboard: viewDashboard, fluxo: viewFluxo, entradas: () => viewLancamentos('Entrada'),
         saidas: () => viewLancamentos('Saída'), boletos: viewBoletos, estoque: viewEstoque,
-        ifood: viewIfood, funcionarios: viewFuncionarios, marketing: viewMarketing, cubas: viewCubas,
+        ifood: viewIfood, funcionarios: viewFuncionarios, marketing: viewMarketing, cubas: viewCubas, getnet: viewGetnet,
         comparativos: viewComparativos, consultoria: viewConsultoria, alertas: viewAlertas, config: viewConfig,
       }[viewAtual] || viewDashboard;
       main.innerHTML = '';
@@ -599,6 +611,149 @@
       { label: 'Cuba 4.000 ml', data: comp.map(s => s.c4000.custoTotal), color: p.pistache },
       { label: 'Cuba 8.000 ml', data: comp.map(s => s.c8000.custoTotal), color: p.amarena },
     ]);
+  }
+
+  /* ---------- CARTÕES (GETNET) ---------- */
+
+  async function processarPdfsGetnet(files) {
+    const status = $('#getnet-status');
+    if (status) status.textContent = 'Lendo arquivo(s)…';
+    try {
+      let novo = { cartoes: [], pix: [], agenda: [], resumo: {} };
+      for (const f of files) {
+        const buf = await f.arrayBuffer();
+        const ehCsv = /\.csv$/i.test(f.name);
+        const p = ehCsv
+          ? DB.getnet.parsearCsv(buf)
+          : DB.getnet.parsearLinhas(await DB.getnet.extrairLinhas(buf));
+        novo.cartoes.push(...p.cartoes);
+        novo.pix.push(...p.pix);
+        if (p.agenda.length) { novo.agenda = p.agenda; novo.resumo = Object.assign(novo.resumo, p.resumo); }
+      }
+      if (!novo.cartoes.length && !novo.agenda.length && !novo.pix.length) {
+        alert('Não reconheci os dados nesses arquivos. Use os CSVs "extrato_consolidado_cartao", "extrato_consolidado_pix" e "AgendaFinanceiraSimplificada" (ou os PDFs equivalentes) do portal Getnet.');
+        if (status) status.textContent = '';
+        return;
+      }
+      GETNET = DB.getnet.mesclar(GETNET, novo);
+      DB.getnet.salvar(GETNET);
+      GAN = DB.getnet.analisar(GETNET, M);
+      render();
+    } catch (err) {
+      console.error(err);
+      alert('Erro ao ler o arquivo: ' + err.message);
+      if (status) status.textContent = '';
+    }
+  }
+
+  function viewGetnet(main) {
+    const uploader = `
+      <div class="cuba-toggle" style="margin-bottom:4px">
+        <button class="side-btn" id="btn-getnet-up" style="max-width:340px"><i class="bi bi-file-earmark-arrow-up"></i> Carregar arquivos da Getnet (CSV ou PDF)</button>
+        ${GETNET ? `<button class="side-btn" id="btn-getnet-pub" style="max-width:330px"><i class="bi bi-cloud-arrow-up"></i> Baixar arquivo para publicar no GitHub</button>` : ''}
+        <span id="getnet-status" class="dim"></span>
+        ${GETNET ? `<button class="side-btn" id="btn-getnet-clear" style="max-width:170px;margin-left:auto"><i class="bi bi-trash3"></i> Limpar dados</button>` : ''}
+      </div>
+      <p class="note dim">Aceita os <strong>CSVs</strong> do portal Getnet (extrato_consolidado_cartao, extrato_consolidado_pix e AgendaFinanceiraSimplificada) ou os <strong>PDFs</strong> equivalentes — pode arrastar todos juntos; os demais CSVs (totais, recarga, van, voucher) são ignorados sem problema. Obs.: o indicador de cessão só vem no PDF da agenda. Os dados ficam salvos neste navegador e relatórios de meses seguintes são somados automaticamente (sem duplicar).${GETNET?.atualizadoEm ? ' Última atualização: ' + GETNET.atualizadoEm.toLocaleString('pt-BR') + '.' : ''}</p>
+      ${GETNET ? `<p class="note"><strong>Para os sócios verem estes dados:</strong> clique em <em>Baixar arquivo para publicar no GitHub</em> e suba o <code>getnet_dados.json</code> gerado no repositório (Add file → Upload files), igual faz com a planilha. Quem abrir o site carrega esse arquivo automaticamente.</p>` : ''}`;
+
+    if (!GAN) {
+      main.innerHTML = card('Cartões · Getnet', uploader + '<p class="note" style="margin-top:10px">Nenhum dado carregado ainda. Baixe os dois relatórios no portal da Getnet e arraste aqui.</p>');
+      ligarUploadGetnet();
+      return;
+    }
+
+    const A = GAN;
+    const cessaoPct = A.agendaTotal ? (A.cessao / A.agendaTotal) * 100 : null;
+
+    const kpis = `
+      <div class="kpi-grid">
+        ${kpiCard({ icon: 'bi-credit-card', label: 'Vendas no cartão (período)', valor: U.brl(A.cartaoBruto), sub: A.cartaoQtd + ' transações' })}
+        ${kpiCard({ icon: 'bi-percent', label: 'Taxas pagas à maquininha', valor: U.brl(A.cartaoTaxa), sub: U.pct(A.taxaMediaPct, 2) + ' em média', invert: true, cls: 'kpi-warn' })}
+        ${kpiCard({ icon: 'bi-qr-code', label: 'PIX na maquininha', valor: U.brl(A.pixBruto), sub: A.pixQtd + ' transações · taxa zero' })}
+        ${kpiCard({ icon: 'bi-receipt-cutoff', label: 'Ticket médio real', valor: U.brl(A.ticketGeral), sub: `cartão ${U.brl(A.ticketCartao)} · pix ${U.brl(A.ticketPix)}` })}
+        ${kpiCard({ icon: 'bi-calendar-week', label: 'A receber em 7 dias', valor: U.brl(A.receber7) })}
+        ${kpiCard({ icon: 'bi-calendar-month', label: 'A receber em 30 dias', valor: U.brl(A.receber30), sub: 'agenda total ' + U.brl(A.agendaTotal) })}
+      </div>`;
+
+    const alertaCessao = cessaoPct != null && cessaoPct > 50 ? `
+      <div class="alerta warn"><i class="bi bi-exclamation-triangle"></i><div>
+        <strong>${U.pct(cessaoPct)} da agenda está cedida (${U.brl(A.cessao)})</strong>
+        <p>Só ${U.brl(A.agendaLivre)} estão livres para negociação. Cessão normalmente indica recebíveis comprometidos com antecipação ou garantia bancária — e o <em>custo</em> desse adiantamento não aparece nos relatórios da Getnet (campo Antecipação zerado). Ele é descontado no banco: quando você trouxer o extrato bancário, vamos cruzar o valor que cai na conta com o líquido da agenda e medir exatamente quanto essa antecipação custa por mês.</p>
+      </div></div>` : '';
+
+    // taxas por bandeira/modalidade
+    const bandeiras = Object.entries(A.porBandeira).sort((a, b) => b[1].bruto - a[1].bruto);
+    const rowsBand = bandeiras.map(([b, v]) => {
+      const pct = (v.taxa / v.bruto) * 100;
+      const cred = v.porMod['Crédito'], deb = v.porMod['Débito'];
+      return `<tr><td><strong>${b}</strong></td>
+        <td class="mono">${U.brl(v.bruto)}</td>
+        <td class="mono">${U.brl(v.taxa)}</td>
+        <td class="mono"><span class="badge ${pct > 2.2 ? 'bad' : pct > 1.5 ? 'warn' : 'ok'}">${U.pct(pct, 2)}</span></td>
+        <td class="mono">${cred ? U.pct(cred.taxa / cred.bruto * 100, 2) : '—'}</td>
+        <td class="mono">${deb ? U.pct(deb.taxa / deb.bruto * 100, 2) : '—'}</td></tr>`;
+    }).join('');
+
+    // cruzamento com a planilha
+    const rowsCruz = A.cruzamento.map(c => `
+      <tr><td><strong>${U.ymLabel(c.mes)}</strong>${c.parcial ? ' <span class="chip">relatório parcial</span>' : ''}</td>
+        <td class="mono">${U.brl(c.planilha)}</td>
+        <td class="mono">${U.brl(c.getnet)}</td>
+        <td class="mono ${c.diferenca < 0 ? 'neg' : ''}">${U.brl(c.diferenca)}${!c.parcial && c.diferenca < 0 ? ' <span class="badge bad">lançamento faltando?</span>' : ''}</td></tr>`).join('');
+
+    main.innerHTML = `
+      ${card('Cartões · Getnet', uploader)}
+      ${kpis}
+      ${alertaCessao}
+      <div class="grid-2">
+        ${card('Vendas na maquininha por mês', '<div class="chart-box"><canvas id="ch-gn-mes"></canvas></div>')}
+        ${card('Venda média por dia da semana', '<div class="chart-box"><canvas id="ch-gn-dow"></canvas></div>')}
+      </div>
+      ${card('Taxas por bandeira', `<div class="table-wrap"><table>
+        <thead><tr><th>Bandeira</th><th>Bruto</th><th>Taxas</th><th>Taxa média</th><th>Crédito</th><th>Débito</th></tr></thead>
+        <tbody>${rowsBand}</tbody></table></div>
+        <p class="note">Crédito custa ${U.pct(A.porMod['Crédito'] ? A.porMod['Crédito'].taxa / A.porMod['Crédito'].bruto * 100 : null, 2)} e débito ${U.pct(A.porMod['Débito'] ? A.porMod['Débito'].taxa / A.porMod['Débito'].bruto * 100 : null, 2)}. PIX na maquininha é isento — cada 1% de vendas migrando de crédito para PIX economiza ~${U.brl(A.cartaoBruto * 0.01 * (A.taxaMediaPct / 100))} no período.</p>`)}
+      ${card('Recebíveis por semana (agenda)', '<div class="chart-box"><canvas id="ch-gn-receb"></canvas></div>')}
+      ${A.cruzamento.length ? card('Cruzamento: planilha × maquininha', `<div class="table-wrap"><table>
+        <thead><tr><th>Mês</th><th>Vendas na planilha (balcão)</th><th>Getnet (cartão + PIX)</th><th>Diferença (≈ dinheiro)</th></tr></thead>
+        <tbody>${rowsCruz}</tbody></table></div>
+        <p class="note">A diferença aproxima o que entrou em <strong>dinheiro vivo</strong> (ou aponta lançamento faltando, se ficar negativa). Quando o extrato do banco entrar no sistema, esse cruzamento fecha o ciclo: venda registrada → maquininha → conta bancária.</p>`) : ''}`;
+
+    ligarUploadGetnet();
+    if ($('#btn-getnet-pub')) $('#btn-getnet-pub').addEventListener('click', () => DB.getnet.exportarJson(GETNET));
+    if ($('#btn-getnet-clear')) $('#btn-getnet-clear').addEventListener('click', () => {
+      if (confirm('Apagar os dados da Getnet salvos neste navegador?')) { DB.getnet.limpar(); GETNET = null; GAN = null; render(); }
+    });
+
+    // gráficos
+    const p = DB.charts.palette();
+    const mesesG = Object.keys(A.porMes).sort();
+    DB.charts.barras('ch-gn-mes', mesesG.map(U.ymLabel), [
+      { label: 'Cartão', data: mesesG.map(k => A.porMes[k].bruto), color: p.pistache },
+      { label: 'PIX', data: mesesG.map(k => A.porMes[k].pix), color: p.blue },
+      { label: 'Taxas', data: mesesG.map(k => -A.porMes[k].taxa), color: p.amarena },
+    ]);
+    const nomesDias = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+    const mediaDow = A.porDiaSemana.map(d => d.dias.size ? d.bruto / d.dias.size : 0);
+    DB.charts.barras('ch-gn-dow', nomesDias, [{ label: 'Venda média/dia', data: mediaDow, color: p.gold }]);
+    const semanas = Object.keys(A.recebPorSemana).sort();
+    DB.charts.barras('ch-gn-receb', semanas.map(k => 'sem. ' + A.recebPorSemana[k].label), [
+      { label: 'A receber', data: semanas.map(k => A.recebPorSemana[k].total), color: p.purple },
+    ]);
+  }
+
+  function ligarUploadGetnet() {
+    const btn = $('#btn-getnet-up');
+    if (!btn) return;
+    let inp = $('#getnet-file-input');
+    if (!inp) {
+      inp = document.createElement('input');
+      inp.type = 'file'; inp.accept = '.pdf,.csv'; inp.multiple = true; inp.hidden = true; inp.id = 'getnet-file-input';
+      document.body.appendChild(inp);
+      inp.addEventListener('change', e => { if (e.target.files.length) processarPdfsGetnet([...e.target.files]); inp.value = ''; });
+    }
+    btn.addEventListener('click', () => inp.click());
   }
 
   function viewConsultoria(main) {
