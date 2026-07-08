@@ -25,7 +25,7 @@ a planilha direto na tela inicial do site — tudo roda no navegador.
 
 ## Cartões (Getnet)
 
-No menu **Cartões**, arraste os arquivos do portal Getnet — de preferência
+No menu **Getnet**, arraste os arquivos do portal Getnet — de preferência
 os **CSVs** (extrato_consolidado_cartao, extrato_consolidado_pix e
 AgendaFinanceiraSimplificada; os demais são ignorados). Os PDFs
 equivalentes também funcionam. Obs.: o indicador de cessão da agenda
@@ -49,6 +49,6 @@ para qualquer pessoa que abrir o link.
 A aba **Producao_Cubas** da planilha registra a produção diária:
 `Data | Sabor | Produtor | Quantidade`. Acrescente linhas nela mesma
 (ou crie abas novas no mesmo formato — são detectadas sozinhas).
-O menu **Produção** mostra ranking de sabores, sazonalidade mês a mês,
+O menu **Cubas Vendidas** mostra ranking de sabores, sazonalidade mês a mês,
 divisão por produtor e custo estimado (sabores com receita cadastrada).
 Grafias diferentes do mesmo sabor são unificadas automaticamente.

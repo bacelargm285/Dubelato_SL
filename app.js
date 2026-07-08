@@ -482,10 +482,10 @@
   /** Sugestões específicas por grupo estourado */
   function sugestaoCusto(id, a) {
     const dicas = {
-      cmv: 'Caminhos: renegociar os 3 maiores fornecedores de matéria-prima, revisar porcionamento (o custo/cuba em Cubas & Sabores mostra os sabores caros), medir perdas/quebras e priorizar na vitrine sabores de maior margem.',
+      cmv: 'Caminhos: renegociar os 3 maiores fornecedores de matéria-prima, revisar porcionamento (o custo/cuba em Custo das Cubas mostra os sabores caros), medir perdas/quebras e priorizar na vitrine sabores de maior margem.',
       folha: 'Compare a escala com o movimento real: os dados da maquininha mostram que sábado e domingo vendem 4–5× mais que meio de semana — concentre freelancers no fim de semana e enxugue dias fracos.',
       fixos: 'Revise os itens da tabela de gastos recorrentes abaixo: contratos de sistema, contabilidade e serviços costumam ter margem de renegociação anual.',
-      ifood: 'O custo do canal está pesado para o faturamento. Avalie repassar parte da taxa no preço do cardápio iFood ou incentivar retirada/balcão (o cruzamento em Cartões mostra a economia por venda migrada).',
+      ifood: 'O custo do canal está pesado para o faturamento. Avalie repassar parte da taxa no preço do cardápio iFood ou incentivar retirada/balcão (o cruzamento em Getnet mostra a economia por venda migrada).',
       marketing: 'Gasto acima da faixa: confira o ROI na aba Marketing e concentre verba nas campanhas com retorno comprovado.',
       impostos: 'Acima da faixa típica do Simples para o setor — vale uma conversa com a contabilidade sobre enquadramento e créditos.',
     };
@@ -665,7 +665,7 @@
 
   function viewCubas(main) {
     if (!CUBAS) {
-      main.innerHTML = card('Cubas & Sabores', `
+      main.innerHTML = card('Custo das Cubas', `
         <p class="note">A aba <strong>Valor_Cuba</strong> não foi encontrada na planilha carregada.</p>
         <p class="note">Você pode: (a) copiar a aba Valor_Cuba para dentro da planilha principal
         (no Excel: botão direito na aba → <em>Mover ou Copiar</em> → marcar <em>Criar uma cópia</em>), ou
@@ -813,7 +813,7 @@
       ${GETNET ? `<p class="note"><strong>Para os sócios verem estes dados:</strong> clique em <em>Baixar arquivo para publicar no GitHub</em> e suba o <code>getnet_dados.json</code> gerado no repositório (Add file → Upload files), igual faz com a planilha. Quem abrir o site carrega esse arquivo automaticamente.</p>` : ''}`;
 
     if (!GAN) {
-      main.innerHTML = card('Cartões · Getnet', uploader + '<p class="note" style="margin-top:10px">Nenhum dado carregado ainda. Baixe os dois relatórios no portal da Getnet e arraste aqui.</p>');
+      main.innerHTML = card('Getnet · Maquininha', uploader + '<p class="note" style="margin-top:10px">Nenhum dado carregado ainda. Baixe os dois relatórios no portal da Getnet e arraste aqui.</p>');
       ligarUploadGetnet();
       return;
     }
@@ -858,7 +858,7 @@
         <td class="mono ${c.diferenca < 0 ? 'neg' : ''}">${U.brl(c.diferenca)}${!c.parcial && c.diferenca < 0 ? ' <span class="badge bad">lançamento faltando?</span>' : ''}</td></tr>`).join('');
 
     main.innerHTML = `
-      ${card('Cartões · Getnet', uploader)}
+      ${card('Getnet · Maquininha', uploader)}
       ${kpis}
       ${alertaCessao}
       <div class="grid-2">

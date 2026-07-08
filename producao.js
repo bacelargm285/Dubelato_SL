@@ -73,7 +73,7 @@ DB.producao = (function () {
     let acum = 0, pareto80 = 0;
     for (const s of sabores) { acum += s.total; pareto80++; if (acum >= totalGeral * 0.8) break; }
 
-    // cruzamento com custo de receita (Cubas & Sabores) — igualdade exata da
+    // cruzamento com custo de receita (Custo das Cubas) — igualdade exata da
     // chave canônica ("Mousse de Pistache" NÃO herda o custo do "Pistache")
     let custoMatch = null;
     if (cubasModel) {
