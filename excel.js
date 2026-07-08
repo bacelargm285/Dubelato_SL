@@ -343,6 +343,62 @@ DB.excel = (function () {
     return itens.length >= 3 ? itens : null;
   }
 
+  /* ---------- 7. NUTRICIONAL (tabela por 100 g) ---------- */
+
+  function parseNutricional(ws) {
+    const rows = grid(ws);
+    let h = null;
+    for (let i = 0; i < Math.min(rows.length, 4); i++) {
+      const c = {};
+      (rows[i] || []).forEach((cell, j) => {
+        const n = U.norm(cell);
+        if (n === 'sabor') c.sabor = j;
+        else if (n === 'kcal') c.kcal = j;
+        else if (n.startsWith('vd kcal')) c.vdKcal = j;
+        else if (n.startsWith('carboidratos')) c.carb = j;
+        else if (n.startsWith('vd carb')) c.vdCarb = j;
+        else if (n.startsWith('acucares totais')) c.acucar = j;
+        else if (n.startsWith('acucares adicionados')) c.acucarAdic = j;
+        else if (n.startsWith('gorduras totais')) c.gord = j;
+        else if (n.startsWith('vd gord')) c.vdGord = j;
+        else if (n.startsWith('gorduras saturadas')) c.sat = j;
+        else if (n.startsWith('vd sat')) c.vdSat = j;
+        else if (n.startsWith('proteina')) c.prot = j;
+        else if (n.startsWith('vd prot')) c.vdProt = j;
+        else if (n.startsWith('fibra')) c.fibra = j;
+        else if (n.startsWith('vd fibra')) c.vdFibra = j;
+        else if (n.startsWith('sodio')) c.sodio = j;
+        else if (n.startsWith('vd sodio')) c.vdSodio = j;
+        else if (n.startsWith('contem leite')) c.leite = j;
+        else if (n.startsWith('contem acucar')) c.temAcucar = j;
+      });
+      if (c.sabor != null && c.kcal != null) { h = { rowIdx: i, c }; break; }
+    }
+    if (!h) return null;
+    const { c } = h;
+    const g = (r, j) => j != null ? (U.toNum(r[j]) ?? 0) : 0;
+    const itens = [];
+    for (let i = h.rowIdx + 1; i < rows.length; i++) {
+      const r = rows[i]; if (!r) continue;
+      const sabor = String(r[c.sabor] ?? '').trim();
+      if (!sabor || U.toNum(r[c.kcal]) == null) continue;
+      itens.push({
+        sabor,
+        kcal: g(r, c.kcal), vdKcal: g(r, c.vdKcal),
+        carb: g(r, c.carb), vdCarb: g(r, c.vdCarb),
+        acucar: g(r, c.acucar), acucarAdic: g(r, c.acucarAdic),
+        gord: g(r, c.gord), vdGord: g(r, c.vdGord),
+        sat: g(r, c.sat), vdSat: g(r, c.vdSat),
+        prot: g(r, c.prot), vdProt: g(r, c.vdProt),
+        fibra: g(r, c.fibra), vdFibra: g(r, c.vdFibra),
+        sodio: g(r, c.sodio), vdSodio: g(r, c.vdSodio),
+        leite: U.norm(r[c.leite]) === 'sim',
+        temAcucar: U.norm(r[c.temAcucar]) === 'sim',
+      });
+    }
+    return itens.length ? itens : null;
+  }
+
   /* ---------- ORQUESTRAÇÃO ---------- */
 
   /**
@@ -350,7 +406,7 @@ DB.excel = (function () {
    * não pelo nome. Retorna o modelo de dados bruto.
    */
   function parseWorkbook(wb) {
-    const model = { txs: [], estoque: [], boletos: [], cartao: [], cubas: null, producao: [], abas: [], avisos: [] };
+    const model = { txs: [], estoque: [], boletos: [], cartao: [], cubas: null, producao: [], nutricional: null, abas: [], avisos: [] };
     const nomes = wb.SheetNames;
 
     // 1ª passada: lançamentos (para descobrir o ano de referência dos boletos)
@@ -369,6 +425,10 @@ DB.excel = (function () {
       if (n.includes('cart')) {
         const ct = parseCartao(ws);
         if (ct) { model.cartao.push(...ct); model.abas.push({ name, tipo: `cartão (${ct.length} lançamentos)` }); continue; }
+      }
+      if (n.includes('nutri')) {
+        const nut = parseNutricional(ws);
+        if (nut) { model.nutricional = nut; model.abas.push({ name, tipo: `nutricional (${nut.length} sabores)` }); continue; }
       }
       if (n.includes('boleto')) continue; // 2ª passada
       // produção de cubas (Data|Sabor|Quantidade) — testa antes dos lançamentos

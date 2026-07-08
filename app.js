@@ -178,7 +178,7 @@
       const fn = {
         dashboard: viewDashboard, fluxo: viewFluxo, entradas: () => viewLancamentos('Entrada'),
         saidas: () => viewLancamentos('Saída'), boletos: viewBoletos, estoque: viewEstoque,
-        ifood: viewIfood, funcionarios: viewFuncionarios, marketing: viewMarketing, cubas: viewCubas, getnet: viewGetnet, producao: viewProducao,
+        ifood: viewIfood, funcionarios: viewFuncionarios, marketing: viewMarketing, cubas: viewCubas, getnet: viewGetnet, producao: viewProducao, nutricional: viewNutricional,
         comparativos: viewComparativos, consultoria: viewConsultoria, alertas: viewAlertas, config: viewConfig,
       }[viewAtual] || viewDashboard;
       main.innerHTML = '';
@@ -933,6 +933,78 @@
     DB.charts.barras('ch-pr-mes', P.meses.map(U.ymLabel),
       [{ label: 'Cubas', data: P.meses.map(m => P.porMes[m].total), color: p.gold }],
       { unidades: true, sufixo: 'cubas' });
+  }
+
+  /* ---------- NUTRICIONAL ---------- */
+
+  let nutSabor = null, nutPorcao = 100;
+  const PORCOES = [
+    { nome: 'Por 100 g', g: 100 },
+    { nome: 'Copo pequeno (150 g)', g: 150 },
+    { nome: 'Copo médio (210 g)', g: 210 },
+    { nome: 'Copo grandíssimo (300 g)', g: 300 },
+    { nome: 'Cascão 1 bola (150 g)', g: 150 },
+    { nome: 'Cascão 2 bolas (250 g)', g: 250 },
+  ];
+
+  function viewNutricional(main) {
+    const NUT = RAW.nutricional;
+    if (!NUT) {
+      main.innerHTML = card('Informações nutricionais', '<p class="note">Aba <code>Nutricional</code> não encontrada na planilha. Ela guarda a tabela por 100 g de cada sabor — para adicionar sabores novos, acrescente linhas seguindo o mesmo cabeçalho.</p>');
+      return;
+    }
+    if (!nutSabor || !NUT.some(s => s.sabor === nutSabor)) nutSabor = NUT[0].sabor;
+    const s = NUT.find(x => x.sabor === nutSabor);
+    const fator = nutPorcao / 100;
+    const fmt = (v, dig = 1) => v ? (v * fator).toLocaleString('pt-BR', { maximumFractionDigits: dig }) : '0';
+    const vd = v => v ? Math.round(v * fator) + '%' : '0%';
+
+    const selSabores = NUT.map(x => `<option ${x.sabor === nutSabor ? 'selected' : ''}>${U.esc(x.sabor)}</option>`).join('');
+    const selPorcoes = PORCOES.map((p, i) => `<option value="${p.g}" ${p.g === nutPorcao && (i === 0 ? nutPorcao === 100 : true) ? 'selected' : ''}>${p.nome}</option>`).join('');
+
+    const selos = [
+      !s.leite ? '<span class="badge ok"><i class="bi bi-check2"></i> não contém leite</span>' : '<span class="badge">contém leite</span>',
+      !s.temAcucar ? '<span class="badge ok"><i class="bi bi-check2"></i> sem açúcar adicionado</span>' : '<span class="badge">contém açúcar</span>',
+    ].join(' ');
+
+    const linhas = [
+      ['Valor energético', fmt(s.kcal, 0) + ' kcal', vd(s.vdKcal)],
+      ['Carboidratos', fmt(s.carb) + ' g', vd(s.vdCarb)],
+      ['— Açúcares totais', fmt(s.acucar) + ' g', '—'],
+      ['— Açúcares adicionados', fmt(s.acucarAdic) + ' g', '—'],
+      ['Gorduras totais', fmt(s.gord) + ' g', vd(s.vdGord)],
+      ['— Gorduras saturadas', fmt(s.sat) + ' g', vd(s.vdSat)],
+      ['Proteínas', fmt(s.prot) + ' g', vd(s.vdProt)],
+      ['Fibra alimentar', fmt(s.fibra) + ' g', vd(s.vdFibra)],
+      ['Sódio', fmt(s.sodio, 0) + ' mg', vd(s.vdSodio)],
+    ].map(([n, v, d]) => `<tr><td>${n}</td><td class="mono right"><strong>${v}</strong></td><td class="mono right dim">${d}</td></tr>`).join('');
+
+    const rotulo = card('Calculadora por porção', `
+      <div class="cuba-toggle" style="margin-bottom:14px">
+        <select id="nut-sabor" class="input" style="max-width:280px">${selSabores}</select>
+        <select id="nut-porcao" class="input" style="max-width:250px">${selPorcoes}</select>
+        <span style="margin-left:auto">${selos}</span>
+      </div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Porção de ${nutPorcao} g — ${U.esc(s.sabor)}</th><th class="right">Quantidade</th><th class="right">%VD*</th></tr></thead>
+        <tbody>${linhas}</tbody></table></div>
+      <p class="note dim">*%VD com base em dieta de 2.000 kcal / 8.400 kJ, escalonado pela porção. Valores derivados da tabela oficial por 100 g.</p>`);
+
+    // tabela geral por 100 g
+    const rowsAll = NUT.map(x => `<tr>
+      <td><strong>${U.esc(x.sabor)}</strong> ${!x.leite ? '<span class="badge ok">s/ leite</span>' : ''}${!x.temAcucar ? ' <span class="badge ok">s/ açúcar adic.</span>' : ''}</td>
+      <td class="mono right">${x.kcal}</td><td class="mono right">${x.carb}</td><td class="mono right">${x.acucar}</td>
+      <td class="mono right">${x.gord}</td><td class="mono right">${x.sat}</td><td class="mono right">${x.prot}</td>
+      <td class="mono right">${x.fibra || '—'}</td><td class="mono right">${x.sodio}</td></tr>`).join('');
+
+    main.innerHTML = rotulo + card('Tabela completa — por 100 g', `
+      <div class="table-wrap"><table>
+        <thead><tr><th>Sabor</th><th class="right">Kcal</th><th class="right">Carb (g)</th><th class="right">Açúc. (g)</th><th class="right">Gord. (g)</th><th class="right">Sat. (g)</th><th class="right">Prot. (g)</th><th class="right">Fibra (g)</th><th class="right">Sódio (mg)</th></tr></thead>
+        <tbody>${rowsAll}</tbody></table></div>
+      <p class="note">Morango e Limão Siciliano são sorbets — não contêm leite. Coco e Gianduia não têm açúcar adicionado. Para incluir um sabor novo, acrescente a linha na aba <code>Nutricional</code> da planilha.</p>`);
+
+    $('#nut-sabor').addEventListener('change', e => { nutSabor = e.target.value; render(); });
+    $('#nut-porcao').addEventListener('change', e => { nutPorcao = +e.target.value; render(); });
   }
 
   function viewConsultoria(main) {
