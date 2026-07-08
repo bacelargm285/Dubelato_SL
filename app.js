@@ -1253,10 +1253,14 @@
 
     const rowsPrev = PD.map(p => {
       const nomes = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+      const ctxBadge = p.ctx.contexto === 'normal'
+        ? (DB.calendario.ehFeriasEscolares(p.data) ? '<span class="chip">férias escolares</span>' : '<span class="dim">—</span>')
+        : `<span class="badge ${p.ctx.contexto === 'feriadao' ? 'ok' : 'good'}">${U.esc(p.ctx.nome || DB.calendario.ROTULOS[p.ctx.contexto])}</span>`;
       return `<tr>
         <td><strong>${nomes[p.data.getDay()]}</strong> <span class="dim">${U.fmtDate(p.data)}</span></td>
         <td class="mono">${Math.round(p.tmax)}°C <span class="chip">${p.faixa.label.split(' (')[0]}</span></td>
-        <td>${p.chove ? '<span class="badge warn"><i class="bi bi-cloud-rain"></i> chuva provável' + (p.probChuva != null ? ' ' + p.probChuva + '%' : '') + '</span>' : '<span class="badge ok">tempo firme</span>'}</td>
+        <td>${p.chove ? '<span class="badge warn"><i class="bi bi-cloud-rain"></i> chuva' + (p.probChuva != null ? ' ' + p.probChuva + '%' : '') + '</span>' : '<span class="badge ok">firme</span>'}</td>
+        <td>${ctxBadge}</td>
         <td class="mono right"><strong>${U.brl(p.estimativa)}</strong></td>
         <td class="mono right dim">${(p.estimativa / A.mediaGeral * 100).toFixed(0)}% da média</td>
       </tr>`;
@@ -1266,9 +1270,18 @@
       ${kpis}
       ${card('Previsão de demanda — próximos 7 dias', `
         <div class="table-wrap"><table>
-          <thead><tr><th>Dia</th><th>Máxima</th><th>Chuva</th><th class="right">Venda estimada</th><th class="right">vs média</th></tr></thead>
+          <thead><tr><th>Dia</th><th>Máxima</th><th>Chuva</th><th>Calendário</th><th class="right">Venda estimada</th><th class="right">vs média</th></tr></thead>
           <tbody>${rowsPrev}</tbody></table></div>
-        <p class="note">Estimativa = sua média histórica ajustada pelo dia da semana e pela faixa de temperatura${A.fatorChuva !== 1 ? ' (e pela chuva, quando provável)' : ''}. Use para dimensionar produção de cubas e escala de freelancers. Semana somada: <strong>${U.brl(U.sum(PD, p => p.estimativa))}</strong>.</p>`)}
+        <p class="note">Estimativa = sua média histórica ajustada por dia da semana × temperatura × calendário turístico (feriadões, datas comemorativas, férias escolares)${A.fatorChuva !== 1 ? ' (e pela chuva, quando provável)' : ''}. Use para dimensionar produção de cubas e escala de freelancers. Semana somada: <strong>${U.brl(U.sum(PD, p => p.estimativa))}</strong>.</p>`)}
+      ${card('Efeito do calendário medido nas SUAS vendas', `
+        <div class="table-wrap"><table>
+          <thead><tr><th>Contexto</th><th class="right">Dias na base</th><th class="right">Efeito sobre o dia equivalente</th></tr></thead>
+          <tbody>${A.contextos.map(c => `<tr>
+            <td><strong>${c.rotulo}</strong></td>
+            <td class="mono right">${c.dias}</td>
+            <td class="mono right">${c.fator == null ? '<span class="dim">poucos dias — neutro</span>' : `<span class="badge ${c.fator >= 1.1 ? 'ok' : c.fator <= 0.9 ? 'bad' : ''}">${c.fator >= 1 ? '+' : '−'}${U.pct(Math.abs(c.fator - 1) * 100)}</span>`}</td>
+          </tr>`).join('')}</tbody></table></div>
+        <p class="note">Efeito já descontando dia da semana e temperatura — ou seja, é o "extra" que o calendário traz. Medido no seu histórico de vendas, não em tabela genérica.</p>`)}
       <div class="grid-2">
         ${card('Venda média por faixa de temperatura', '<div class="chart-box"><canvas id="ch-cl-faixa"></canvas></div>')}
         ${card('Cada dia: temperatura × venda', '<div class="chart-box"><canvas id="ch-cl-scatter"></canvas></div>')}
