@@ -101,13 +101,17 @@ DB.charts = (function () {
     });
   }
 
-  function barras(id, labels, datasets) {
+  function barras(id, labels, datasets, opts = {}) {
     const p = palette();
     const ds = datasets.map((d, i) => Object.assign({
       backgroundColor: hexA(d.color || p.series[i % p.series.length], 0.85),
       borderRadius: 8, borderSkipped: false, maxBarThickness: 42,
     }, d));
     const opt = baseOptions();
+    if (opts.unidades) {
+      opt.scales.y.ticks.callback = v => v.toLocaleString('pt-BR');
+      opt.plugins.tooltip.callbacks.label = ctx => ` ${ctx.dataset.label || ''}: ${(ctx.parsed.y ?? ctx.parsed).toLocaleString('pt-BR')}${opts.sufixo ? ' ' + opts.sufixo : ''}`;
+    }
     make(id, { type: 'bar', data: { labels, datasets: ds }, options: opt });
   }
 
@@ -147,16 +151,18 @@ DB.charts = (function () {
     });
   }
 
-  function barrasHoriz(id, labels, valores, color) {
+  function barrasHoriz(id, labels, valores, color, opts = {}) {
     const p = palette();
     const opt = baseOptions();
     opt.indexAxis = 'y';
     opt.scales = {
-      x: { grid: { color: p.grid }, border: { display: false }, ticks: { callback: v => U.brlShort(v) } },
+      x: { grid: { color: p.grid }, border: { display: false }, ticks: { callback: v => opts.unidades ? v.toLocaleString('pt-BR') : U.brlShort(v) } },
       y: { grid: { color: 'transparent' } },
     };
     opt.plugins.legend.display = false;
-    opt.plugins.tooltip.callbacks.label = ctx => ` ${U.brl(ctx.parsed.x)}`;
+    opt.plugins.tooltip.callbacks.label = ctx => opts.unidades
+      ? ` ${ctx.parsed.x.toLocaleString('pt-BR')}${opts.sufixo ? ' ' + opts.sufixo : ''}`
+      : ` ${U.brl(ctx.parsed.x)}`;
     make(id, {
       type: 'bar',
       data: { labels, datasets: [{ data: valores, backgroundColor: hexA(color || p.amarena, 0.85), borderRadius: 8, maxBarThickness: 22 }] },

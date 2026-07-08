@@ -33,6 +33,9 @@ DB.producao = (function () {
     return chaveN.split(' ').map(w => ['com', 'de', 'di', 'e', 'do', 'da'].includes(w) ? w : w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
   }
 
+  /** Os 8 sabores fixos da vitrine (chaves canônicas) */
+  const FIXOS = ['pistache', 'kinder bueno', 'chocolate belga', 'doce de leite', 'iogurte com amarena', 'fior di latte', 'cheese cake', 'nutellina'];
+
   function build(registros, cubasModel) {
     if (!registros || !registros.length) return null;
     const porSabor = {};   // chave -> { nome, total, porMes: {ym: qtd}, grafias:Set }
@@ -42,7 +45,7 @@ DB.producao = (function () {
     for (const r of registros) {
       const k = chave(r.sabor);
       if (!k) continue;
-      const s = porSabor[k] || (porSabor[k] = { chave: k, nome: titulo(k), total: 0, porMes: {}, grafias: new Set() });
+      const s = porSabor[k] || (porSabor[k] = { chave: k, nome: titulo(k), total: 0, porMes: {}, grafias: new Set(), fixo: FIXOS.includes(k) });
       s.total += r.qtd;
       s.porMes[r.mes] = (s.porMes[r.mes] || 0) + r.qtd;
       s.grafias.add(r.sabor.trim());
@@ -52,6 +55,14 @@ DB.producao = (function () {
       m.sabores.add(k);
       const prod = (r.produtor || 'Não informado').trim() || 'Não informado';
       porProdutor[prod] = (porProdutor[prod] || 0) + r.qtd;
+    }
+
+    // detalhes por sabor: meses ativos, primeiro/último, melhor mês
+    for (const s of Object.values(porSabor)) {
+      s.mesesAtivos = Object.keys(s.porMes).sort();
+      s.primeiro = s.mesesAtivos[0];
+      s.ultimo = s.mesesAtivos[s.mesesAtivos.length - 1];
+      s.melhorMes = s.mesesAtivos.reduce((a, b) => (s.porMes[b] > (s.porMes[a] || 0) ? b : a), s.mesesAtivos[0]);
     }
 
     const sabores = Object.values(porSabor).sort((a, b) => b.total - a.total);

@@ -252,3 +252,9 @@ tr:hover td { background: var(--surface-2); }
   .cal-valor { font-size: 10.5px; }
   .cal-grid { gap: 4px; }
 }
+
+/* -------- consulta de sabores -------- */
+.tabela-sabores { max-height: 420px; overflow-y: auto; }
+.linha-sabor { cursor: pointer; }
+.linha-sabor.sel td { background: linear-gradient(120deg, rgba(224,71,95,.12), rgba(143,188,127,.1)); }
+.tabela-sabores .chip { margin: 1px 2px 1px 0; white-space: nowrap; }

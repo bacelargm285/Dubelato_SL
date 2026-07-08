@@ -832,6 +832,9 @@
 
   /* ---------- PRODUÇÃO DE CUBAS ---------- */
 
+  let saborConsulta = null;  // chave do sabor selecionado na consulta
+  let filtroSabores = '';    // texto da busca
+
   function viewProducao(main) {
     if (!PROD) {
       main.innerHTML = card('Produção de cubas', `<p class="note">Nenhuma aba de produção reconhecida (colunas <strong>Data | Sabor | Produtor | Quantidade</strong>). Adicione a aba <code>Producao_Cubas</code> na planilha principal — registros novos podem ser acrescentados nela mesma ou em abas novas no mesmo formato.</p>`);
@@ -841,20 +844,58 @@
     const mesAtual = P.meses[P.meses.length - 1];
     const mAtual = P.porMes[mesAtual];
     const mesAnt = P.meses[P.meses.length - 2];
-    const lider = P.sabores[0];
+    const fixos = P.sabores.filter(s => s.fixo);
+    const rotativos = P.sabores.filter(s => !s.fixo);
 
     const kpis = `<div class="kpi-grid kpi-grid-4">
-      ${kpiCard({ icon: 'bi-snow2', label: 'Cubas produzidas (total)', valor: String(Math.round(P.totalGeral)), sub: P.meses.length + ' meses registrados' })}
-      ${kpiCard({ icon: 'bi-calendar3', label: 'Cubas em ' + U.ymLabel(mesAtual), valor: String(Math.round(mAtual.total)), deltaPct: mesAnt ? U.delta(mAtual.total, P.porMes[mesAnt].total) : null, sub: mAtual.sabores.size + ' sabores no mês' })}
-      ${kpiCard({ icon: 'bi-trophy', label: 'Sabor líder', valor: U.esc(lider.nome), sub: Math.round(lider.total) + ' cubas (' + U.pct(lider.total / P.totalGeral * 100) + ' do total)' })}
-      ${kpiCard({ icon: 'bi-collection', label: 'Concentração (Pareto)', valor: P.pareto80 + ' sabores', sub: 'respondem por 80% da produção' })}
+      ${kpiCard({ icon: 'bi-snow2', label: 'Cubas em ' + U.ymLabel(mesAtual), valor: String(Math.round(mAtual.total)), deltaPct: mesAnt ? U.delta(mAtual.total, P.porMes[mesAnt].total) : null, sub: mAtual.sabores.size + ' sabores no mês' })}
+      ${kpiCard({ icon: 'bi-pin-angle', label: 'Sabores fixos', valor: fixos.length + ' de 8', sub: Math.round(U.sum(fixos, s => s.total)) + ' cubas (' + U.pct(U.sum(fixos, s => s.total) / P.totalGeral * 100) + ' da produção)' })}
+      ${kpiCard({ icon: 'bi-arrow-repeat', label: 'Sabores rotativos já feitos', valor: String(rotativos.length), sub: Math.round(U.sum(rotativos, s => s.total)) + ' cubas no histórico' })}
+      ${kpiCard({ icon: 'bi-collection', label: 'Produção total registrada', valor: String(Math.round(P.totalGeral)) + ' cubas', sub: P.meses.length + ' meses (março sem controle)' })}
     </div>`;
 
-    // heatmap sazonalidade: top 12 sabores × meses
-    const top = P.sabores.slice(0, 12);
-    const maxCel = Math.max(...top.flatMap(s => P.meses.map(m => s.porMes[m] || 0)), 1);
+    // ---- detalhe do sabor consultado ----
+    let detalhe = '';
+    const sel = saborConsulta ? P.porSabor[saborConsulta] : null;
+    if (sel) {
+      const mediaAtivo = sel.total / sel.mesesAtivos.length;
+      detalhe = card(`<i class="bi bi-search"></i> ${U.esc(sel.nome)} ${sel.fixo ? '<span class="chip">fixo</span>' : '<span class="chip">rotativo</span>'}`, `
+        <div class="kpi-grid kpi-grid-4" style="margin-bottom:14px">
+          ${kpiCard({ icon: 'bi-snow2', label: 'Total produzido', valor: Math.round(sel.total) + ' cubas' })}
+          ${kpiCard({ icon: 'bi-calendar-range', label: 'Meses em que foi feito', valor: String(sel.mesesAtivos.length), sub: 'média de ' + mediaAtivo.toFixed(1) + ' cubas/mês ativo' })}
+          ${kpiCard({ icon: 'bi-star', label: 'Melhor época', valor: U.ymLabel(sel.melhorMes), sub: Math.round(sel.porMes[sel.melhorMes]) + ' cubas' })}
+          ${kpiCard({ icon: 'bi-clock-history', label: 'Última produção', valor: U.ymLabel(sel.ultimo), cls: sel.ultimo < mesAtual ? 'kpi-warn' : '' })}
+        </div>
+        <div class="chart-box"><canvas id="ch-pr-sabor"></canvas></div>
+        <p class="note" style="margin-top:10px">${sel.ultimo < mesAtual
+          ? 'Este sabor não é feito desde <strong>' + U.ymLabelFull(sel.ultimo) + '</strong>. Se a melhor época dele está chegando, é candidato a voltar para a rotação.'
+          : 'Sabor em produção no mês atual.'}</p>`);
+    }
+
+    // ---- tabela de consulta (todos os sabores, com busca) ----
+    const f = U.norm(filtroSabores);
+    const lista = P.sabores.filter(s => !f || U.norm(s.nome).includes(f));
+    const rows = lista.map(s => `
+      <tr class="linha-sabor ${s.chave === saborConsulta ? 'sel' : ''}" data-sabor="${U.esc(s.chave)}">
+        <td><strong>${U.esc(s.nome)}</strong> ${s.fixo ? '<span class="chip">fixo</span>' : ''}</td>
+        <td class="mono right">${Math.round(s.total)}</td>
+        <td class="mono">${s.mesesAtivos.map(m => `<span class="chip">${U.ymLabel(m)}·${Math.round(s.porMes[m])}</span>`).join(' ')}</td>
+        <td class="mono">${U.ymLabel(s.melhorMes)}</td>
+        <td class="mono ${s.ultimo < mesAtual ? 'dim' : 'pos'}">${U.ymLabel(s.ultimo)}</td>
+      </tr>`).join('');
+
+    const consulta = card('Consulta de sabores — histórico completo', `
+      <input id="busca-sabor" class="input busca" type="search" placeholder="Buscar sabor… (ex.: tiramissu, coco, manga)" value="${U.esc(filtroSabores)}">
+      <div class="table-wrap tabela-sabores"><table>
+        <thead><tr><th>Sabor</th><th class="right">Cubas</th><th>Produção por mês</th><th>Melhor mês</th><th>Última vez</th></tr></thead>
+        <tbody>${rows || '<tr><td colspan="5" class="empty">Nenhum sabor encontrado.</td></tr>'}</tbody>
+      </table></div>
+      <p class="note dim">${lista.length} sabor(es) · toque numa linha para abrir o histórico detalhado acima.</p>`);
+
+    // ---- sazonalidade dos 8 fixos ----
+    const maxCel = Math.max(...fixos.flatMap(s => P.meses.map(m => s.porMes[m] || 0)), 1);
     const headMeses = P.meses.map(m => `<th class="right">${U.ymLabel(m)}</th>`).join('');
-    const rowsHeat = top.map(s => {
+    const rowsHeat = fixos.map(s => {
       const cels = P.meses.map(m => {
         const v = s.porMes[m] || 0;
         const al = v ? (0.12 + 0.55 * v / maxCel).toFixed(2) : 0;
@@ -863,45 +904,35 @@
       return `<tr><td><strong>${U.esc(s.nome)}</strong></td>${cels}<td class="right mono"><strong>${Math.round(s.total)}</strong></td></tr>`;
     }).join('');
 
-    // produtores
-    const prods = Object.entries(P.porProdutor).sort((a, b) => b[1] - a[1]);
-    const rowsProd = prods.map(([nome, q]) => `<tr><td>${U.esc(nome)}</td><td class="mono right">${Math.round(q)}</td><td class="mono right dim">${U.pct(q / P.totalGeral * 100)}</td></tr>`).join('');
-
-    // grafias divergentes (higiene de dados)
-    const bagunca = P.sabores.filter(s => s.grafias.size > 1).slice(0, 6);
-    const cardGrafias = bagunca.length ? card('Grafias unificadas automaticamente', `<p class="note">O sistema agrupou variações do mesmo sabor. Se quiser, padronize na planilha:</p>
-      <ul class="note-list">${bagunca.map(s => `<li><strong>${U.esc(s.nome)}</strong>: ${[...s.grafias].slice(0, 4).map(g => `"${U.esc(g)}"`).join(', ')}${s.grafias.size > 4 ? '…' : ''}</li>`).join('')}</ul>`) : '';
-
-    // custo estimado de produção (sabores com receita)
-    let cardCusto = '';
-    if (P.custoMatch && P.custoMatch.length && mAtual) {
-      const linhas = P.custoMatch
-        .map(({ sabor, rec }) => ({ sabor, rec, qtdMes: sabor.porMes[mesAtual] || 0 }))
-        .filter(x => x.qtdMes > 0)
-        .map(x => `<tr><td>${U.esc(x.sabor.nome)}</td><td class="mono right">${Math.round(x.qtdMes)}</td><td class="mono right">${U.brl(x.rec.c8000.custoTotal)}</td><td class="mono right"><strong>${U.brl(x.qtdMes * x.rec.c8000.custoTotal)}</strong></td></tr>`).join('');
-      if (linhas) cardCusto = card('Custo estimado de produção — ' + U.ymLabelFull(mesAtual) + ' (cuba 8.000 ml)', `
-        <div class="table-wrap"><table><thead><tr><th>Sabor</th><th class="right">Cubas</th><th class="right">Custo/cuba</th><th class="right">Total</th></tr></thead><tbody>${linhas}</tbody></table></div>
-        <p class="note">Somente sabores com receita cadastrada em <strong>Cubas &amp; Sabores</strong>. Cadastre as receitas dos demais para o custo de produção completo do mês.</p>`);
-    }
-
     main.innerHTML = `
       ${kpis}
-      <div class="grid-2">
-        ${card('Ranking de sabores (top 15)', '<div class="chart-box tall"><canvas id="ch-pr-rank"></canvas></div>')}
-        ${card('Cubas produzidas por mês', '<div class="chart-box tall"><canvas id="ch-pr-mes"></canvas></div>' )}
-      </div>
-      ${card('Sazonalidade — sabor × mês (top 12)', `<div class="table-wrap"><table><thead><tr><th>Sabor</th>${headMeses}<th class="right">Total</th></tr></thead><tbody>${rowsHeat}</tbody></table></div>
-        <p class="note">Célula mais verde = mais cubas naquele mês. Março não tem registros (controle não foi feito).</p>`)}
-      ${cardCusto}
-      <div class="grid-2">
-        ${card('Por produtor', `<div class="table-wrap"><table><thead><tr><th>Produtor</th><th class="right">Cubas</th><th class="right">%</th></tr></thead><tbody>${rowsProd}</tbody></table></div>`)}
-        ${cardGrafias || card('Dica', '<p class="note">Para o ranking refletir vendas com precisão, registre a produção sempre que uma cuba nova vai para a vitrine — produção repõe o que vendeu.</p>')}
-      </div>`;
+      ${detalhe}
+      ${consulta}
+      ${card('Sazonalidade dos 8 fixos — cubas por mês', `<div class="table-wrap"><table><thead><tr><th>Sabor</th>${headMeses}<th class="right">Total</th></tr></thead><tbody>${rowsHeat}</tbody></table></div>`)}
+      ${card('Cubas produzidas por mês (todos os sabores)', '<div class="chart-box"><canvas id="ch-pr-mes"></canvas></div>')}`;
+
+    // interações
+    $('#busca-sabor').addEventListener('input', e => {
+      filtroSabores = e.target.value;
+      const q = U.norm(filtroSabores);
+      $$('.linha-sabor').forEach(tr => {
+        tr.style.display = !q || U.norm(tr.querySelector('td').textContent).includes(q) ? '' : 'none';
+      });
+    });
+    $$('.linha-sabor').forEach(tr => tr.addEventListener('click', () => {
+      saborConsulta = tr.dataset.sabor;
+      render();
+    }));
 
     const p = DB.charts.palette();
-    const top15 = P.sabores.slice(0, 15);
-    DB.charts.barrasHoriz('ch-pr-rank', top15.map(s => s.nome), top15.map(s => s.total), p.pistache);
-    DB.charts.barras('ch-pr-mes', P.meses.map(U.ymLabel), [{ label: 'Cubas', data: P.meses.map(m => P.porMes[m].total), color: p.gold }]);
+    if (sel) {
+      DB.charts.barras('ch-pr-sabor', P.meses.map(U.ymLabel),
+        [{ label: 'Cubas de ' + sel.nome, data: P.meses.map(m => sel.porMes[m] || 0), color: p.amarena }],
+        { unidades: true, sufixo: 'cubas' });
+    }
+    DB.charts.barras('ch-pr-mes', P.meses.map(U.ymLabel),
+      [{ label: 'Cubas', data: P.meses.map(m => P.porMes[m].total), color: p.gold }],
+      { unidades: true, sufixo: 'cubas' });
   }
 
   function viewConsultoria(main) {
