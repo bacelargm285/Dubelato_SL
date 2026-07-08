@@ -179,7 +179,7 @@
         dashboard: viewDashboard, fluxo: viewFluxo, entradas: () => viewLancamentos('Entrada'),
         saidas: viewSaidas, boletos: viewBoletos, estoque: viewEstoque,
         ifood: viewIfood, funcionarios: viewFuncionarios, marketing: viewMarketing, cubas: viewCubas, getnet: viewGetnet, producao: viewProducao, nutricional: viewNutricional,
-        comparativos: viewComparativos, consultoria: viewConsultoria, alertas: viewAlertas, config: viewConfig,
+        comparativos: viewComparativos, clima: viewClima, consultoria: viewConsultoria, alertas: viewAlertas, config: viewConfig,
       }[viewAtual] || viewDashboard;
       main.innerHTML = '';
       fn(main);
@@ -581,6 +581,58 @@
     const folhaSal = m ? U.sum(m.txs.filter(t => U.norm(t.categoria).includes('salario') && t.tipo === 'Saída'), t => t.valor) : 0;
     const folhaFree = m ? U.sum(m.txs.filter(t => U.norm(t.categoria).includes('freelancer') && t.tipo === 'Saída'), t => t.valor) : 0;
 
+    /* --- Escala × Movimento: receita média por dia da semana (planilha) --- */
+    const NOMES = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+    const porDia = {};
+    for (const t of M.txs) {
+      if (t.tipo !== 'Entrada' || (t.grupo !== 'receitaBalcao' && t.grupo !== 'receitaIfood')) continue;
+      const k = t.date.toDateString();
+      porDia[k] = porDia[k] || { dow: t.date.getDay(), v: 0 };
+      porDia[k].v += t.valor;
+    }
+    const dias = Object.values(porDia);
+    const mediaDow = Array.from({ length: 7 }, (_, d) => {
+      const ds = dias.filter(x => x.dow === d);
+      return ds.length ? U.avg(ds.map(x => x.v)) : 0;
+    });
+    const receitaSemana = U.sum(mediaDow);
+
+    // configuração da escala (persistida no navegador)
+    let esc;
+    try { esc = JSON.parse(localStorage.getItem('db_escala') || 'null'); } catch { esc = null; }
+    if (!esc || !Array.isArray(esc.equipe) || esc.equipe.length !== 7) {
+      esc = { diaria: 120, equipe: [3, 1, 1, 1, 1, 2, 3] }; // Dom..Sáb
+    }
+    const totalFreelaDias = U.sum(esc.equipe);
+    // sugestão: distribui os mesmos freelancer-dias proporcionalmente à receita
+    const sugestao = mediaDow.map(v => receitaSemana ? Math.max(0, Math.round(totalFreelaDias * v / receitaSemana)) : 0);
+
+    const rowsEscala = NOMES.map((n, d) => {
+      const custo = esc.equipe[d] * esc.diaria;
+      const pct = mediaDow[d] ? custo / mediaDow[d] * 100 : null;
+      const cls = pct == null ? '' : pct > 25 ? 'bad' : pct > 15 ? 'warn' : 'ok';
+      return `<tr>
+        <td><strong>${n}</strong></td>
+        <td class="mono right">${U.brl(mediaDow[d])}</td>
+        <td class="right"><input type="number" min="0" max="15" class="input esc-qtd" data-d="${d}" value="${esc.equipe[d]}" style="width:70px;padding:6px 8px;text-align:center"></td>
+        <td class="mono right">${U.brl(custo)}</td>
+        <td class="right"><span class="badge ${cls}">${pct != null ? U.pct(pct) : '—'}</span></td>
+        <td class="mono right dim">${sugestao[d]}</td>
+      </tr>`;
+    }).join('');
+
+    const custoSemana = totalFreelaDias * esc.diaria;
+    const escalaCard = card('Escala × Movimento — simulador de freelancers', `
+      <div class="cuba-toggle" style="margin-bottom:12px">
+        <label class="dim">Diária média do freelancer:</label>
+        <input type="number" id="esc-diaria" class="input" min="0" step="10" value="${esc.diaria}" style="width:110px;padding:6px 10px">
+        <span class="dim" style="margin-left:auto">custo semanal simulado: <strong>${U.brl(custoSemana)}</strong> (${receitaSemana ? U.pct(custoSemana / receitaSemana * 100) : '—'} da receita típica da semana)</span>
+      </div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Dia</th><th class="right">Receita média</th><th class="right">Freelancers</th><th class="right">Custo do dia</th><th class="right">Custo ÷ receita</th><th class="right">Sugerido*</th></tr></thead>
+        <tbody>${rowsEscala}</tbody></table></div>
+      <p class="note">Edite os números e o cálculo atualiza na hora (a configuração fica salva neste navegador). Verde ≤ 15% da receita do dia, amarelo até 25%, vermelho acima. *Sugerido = os mesmos ${totalFreelaDias} freelancer-dias da semana redistribuídos na proporção do movimento real — domingo vende ${mediaDow[3] ? (mediaDow[0] / mediaDow[3]).toFixed(1) : '—'}× a quarta.</p>`);
+
     main.innerHTML = `
       <div class="kpi-grid kpi-grid-4">
         ${kpiCard({ icon: 'bi-people', label: 'Folha total do mês', valor: U.brl(m?.folha), sub: m ? U.ymLabel(m.mes) : '' })}
@@ -588,14 +640,25 @@
         ${kpiCard({ icon: 'bi-person-plus', label: 'Freelancers', valor: U.brl(folhaFree) })}
         ${kpiCard({ icon: 'bi-percent', label: 'Peso sobre faturamento', valor: m?.folhaPct != null ? U.pct(m.folhaPct) : '—', invert: true, cls: m && m.folhaPct > 30 ? 'kpi-warn' : '' })}
       </div>
+      ${card('Receita média por dia da semana (histórico completo)', '<div class="chart-box"><canvas id="ch-fn-dow"></canvas></div>')}
+      ${escalaCard}
       ${card('Folha × faturamento por mês', '<div class="chart-box tall"><canvas id="ch-folha"></canvas></div>')}
-      ${card('Leitura', `<p class="note">Como referência de mercado para food service, a folha saudável fica entre 20% e 30% do faturamento. Valores acima de 30% por meses seguidos apertam a margem — avalie escala de freelancers em dias de menor movimento.</p>`)}`;
+      ${card('Leitura', `<p class="note">Como referência de mercado para food service, a folha saudável fica entre 20% e 30% do faturamento. O simulador acima olha só a parte flexível (freelancers): concentre-os nos dias de pico e enxugue os dias fracos — a coluna "Sugerido" mostra a redistribuição proporcional ao movimento.</p>`)}`;
 
     const p = DB.charts.palette();
+    DB.charts.barras('ch-fn-dow', NOMES, [{ label: 'Receita média/dia', data: mediaDow, color: p.pistache }]);
     DB.charts.barras('ch-folha', meses.map(U.ymLabel), [
       { label: 'Faturamento', data: meses.map(k => M.byMonth[k].receita), color: p.pistache },
       { label: 'Folha', data: meses.map(k => M.byMonth[k].folha), color: p.purple },
     ]);
+
+    // interações do simulador
+    const salvarEsc = () => { localStorage.setItem('db_escala', JSON.stringify(esc)); render(); };
+    $('#esc-diaria').addEventListener('change', e => { esc.diaria = Math.max(0, +e.target.value || 0); salvarEsc(); });
+    $$('.esc-qtd').forEach(inp => inp.addEventListener('change', e => {
+      esc.equipe[+e.target.dataset.d] = Math.max(0, Math.min(15, +e.target.value || 0));
+      salvarEsc();
+    }));
   }
 
   function viewMarketing(main) {
@@ -1158,6 +1221,92 @@
 
     $('#nut-sabor').addEventListener('change', e => { nutSabor = e.target.value; render(); });
     $('#nut-porcao').addEventListener('change', e => { nutPorcao = +e.target.value; render(); });
+  }
+
+  /* ---------- CLIMA × VENDAS ---------- */
+
+  let CLIMA = null; // { analise, previsaoDemanda } após carregar
+
+  function viewClima(main) {
+    if (!CLIMA) {
+      main.innerHTML = card('Clima × Vendas — São Lourenço/MG', `
+        <p class="note">Cruza a venda diária da planilha com a temperatura e chuva históricas da cidade (fonte: Open-Meteo, gratuita) e projeta a demanda dos próximos 7 dias para planejar produção e escala.</p>
+        <button class="side-btn" id="btn-clima" style="max-width:300px;margin-top:10px"><i class="bi bi-thermometer-sun"></i> Carregar análise de clima</button>
+        <p class="note dim" id="clima-status" style="margin-top:8px"></p>`);
+      $('#btn-clima').addEventListener('click', carregarClima);
+      return;
+    }
+    const A = CLIMA.analise, PD = CLIMA.previsaoDemanda;
+
+    const corr = A.r == null ? '—'
+      : A.r >= 0.5 ? 'forte' : A.r >= 0.3 ? 'moderada' : A.r >= 0.15 ? 'fraca' : 'quase nula';
+    const impChuva = (A.mediaChuva && A.mediaSeco)
+      ? U.pct((1 - A.mediaChuva / A.mediaSeco) * 100)
+      : null;
+
+    const kpis = `<div class="kpi-grid kpi-grid-4">
+      ${kpiCard({ icon: 'bi-thermometer-half', label: 'Correlação temperatura × venda', valor: A.r != null ? A.r.toFixed(2) : '—', sub: 'relação ' + corr + ' (' + A.pontos.length + ' dias analisados)' })}
+      ${kpiCard({ icon: 'bi-sun', label: 'Venda em dia muito quente', valor: U.brl(A.porFaixa[3].media), sub: A.porFaixa[3].dias.length + ' dias > 27°' })}
+      ${kpiCard({ icon: 'bi-cloud-snow', label: 'Venda em dia frio', valor: U.brl(A.porFaixa[0].media), sub: A.porFaixa[0].dias.length + ' dias < 18°' })}
+      ${kpiCard({ icon: 'bi-cloud-rain', label: 'Efeito da chuva forte', valor: impChuva != null ? '−' + impChuva : '—', sub: impChuva != null ? `${U.brl(A.mediaSeco)} seco → ${U.brl(A.mediaChuva)} com chuva` : 'poucos dias chuvosos na base', invert: true })}
+    </div>`;
+
+    const rowsPrev = PD.map(p => {
+      const nomes = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+      return `<tr>
+        <td><strong>${nomes[p.data.getDay()]}</strong> <span class="dim">${U.fmtDate(p.data)}</span></td>
+        <td class="mono">${Math.round(p.tmax)}°C <span class="chip">${p.faixa.label.split(' (')[0]}</span></td>
+        <td>${p.chove ? '<span class="badge warn"><i class="bi bi-cloud-rain"></i> chuva provável' + (p.probChuva != null ? ' ' + p.probChuva + '%' : '') + '</span>' : '<span class="badge ok">tempo firme</span>'}</td>
+        <td class="mono right"><strong>${U.brl(p.estimativa)}</strong></td>
+        <td class="mono right dim">${(p.estimativa / A.mediaGeral * 100).toFixed(0)}% da média</td>
+      </tr>`;
+    }).join('');
+
+    main.innerHTML = `
+      ${kpis}
+      ${card('Previsão de demanda — próximos 7 dias', `
+        <div class="table-wrap"><table>
+          <thead><tr><th>Dia</th><th>Máxima</th><th>Chuva</th><th class="right">Venda estimada</th><th class="right">vs média</th></tr></thead>
+          <tbody>${rowsPrev}</tbody></table></div>
+        <p class="note">Estimativa = sua média histórica ajustada pelo dia da semana e pela faixa de temperatura${A.fatorChuva !== 1 ? ' (e pela chuva, quando provável)' : ''}. Use para dimensionar produção de cubas e escala de freelancers. Semana somada: <strong>${U.brl(U.sum(PD, p => p.estimativa))}</strong>.</p>`)}
+      <div class="grid-2">
+        ${card('Venda média por faixa de temperatura', '<div class="chart-box"><canvas id="ch-cl-faixa"></canvas></div>')}
+        ${card('Cada dia: temperatura × venda', '<div class="chart-box"><canvas id="ch-cl-scatter"></canvas></div>')}
+      </div>
+      ${card('Como ler', `<p class="note">Correlação de ${A.r != null ? A.r.toFixed(2) : '—'} (${corr}) entre a máxima do dia e a venda. ${impChuva != null ? 'Chuva forte derruba a venda em ~' + impChuva + ' (' + A.nChuvosos + ' dias chuvosos vs ' + A.nSecos + ' secos na base). ' : ''}O histórico climático fica em cache no navegador; o botão de recarregar aparece quando novos dias de venda entram na planilha.</p>`)}`;
+
+    const p = DB.charts.palette();
+    DB.charts.barras('ch-cl-faixa', A.porFaixa.map(f => f.label), [{ label: 'Venda média/dia', data: A.porFaixa.map(f => f.media || 0), color: p.gold }]);
+    // dispersão temperatura × venda
+    DB.charts.make('ch-cl-scatter', {
+      type: 'scatter',
+      data: { datasets: [{ label: 'Dia', data: A.pontos.map(pt => ({ x: pt.tmax, y: pt.venda })), backgroundColor: DB.charts.hexA(p.pistache, .55), pointRadius: 3.5 }] },
+      options: (() => {
+        const o = { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => ` ${c.parsed.x.toFixed(0)}°C · ${U.brl(c.parsed.y)}` } } },
+          scales: { x: { title: { display: true, text: 'Máxima do dia (°C)' }, grid: { color: p.grid } }, y: { grid: { color: p.grid }, ticks: { callback: v => U.brlShort(v) } } } };
+        return o;
+      })(),
+    });
+  }
+
+  async function carregarClima() {
+    const st = $('#clima-status');
+    try {
+      st.textContent = 'Buscando histórico de clima de São Lourenço…';
+      const datas = M.txs.filter(t => t.tipo === 'Entrada' && (t.grupo === 'receitaBalcao' || t.grupo === 'receitaIfood')).map(t => t.date);
+      const min = new Date(Math.min(...datas)), max = new Date(Math.max(...datas));
+      const hoje = new Date(); const limite = new Date(hoje); limite.setDate(limite.getDate() - 2);
+      const diasClima = await DB.clima.historico(min, max > limite ? limite : max);
+      st.textContent = 'Analisando e buscando previsão…';
+      const analise = DB.clima.analisar(M, diasClima);
+      if (!analise) { st.textContent = 'Poucos dias com venda + clima para analisar.'; return; }
+      const prev = await DB.clima.previsao7d();
+      CLIMA = { analise, previsaoDemanda: DB.clima.preverDemanda(analise, prev) };
+      render();
+    } catch (err) {
+      console.error(err);
+      st.textContent = 'Não foi possível carregar o clima (' + err.message + '). Verifique a internet e tente de novo.';
+    }
   }
 
   function viewConsultoria(main) {
