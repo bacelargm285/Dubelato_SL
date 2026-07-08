@@ -177,7 +177,7 @@
     requestAnimationFrame(() => {
       const fn = {
         dashboard: viewDashboard, fluxo: viewFluxo, entradas: () => viewLancamentos('Entrada'),
-        saidas: () => viewLancamentos('Saída'), boletos: viewBoletos, estoque: viewEstoque,
+        saidas: viewSaidas, boletos: viewBoletos, estoque: viewEstoque,
         ifood: viewIfood, funcionarios: viewFuncionarios, marketing: viewMarketing, cubas: viewCubas, getnet: viewGetnet, producao: viewProducao, nutricional: viewNutricional,
         comparativos: viewComparativos, consultoria: viewConsultoria, alertas: viewAlertas, config: viewConfig,
       }[viewAtual] || viewDashboard;
@@ -337,6 +337,159 @@
       const f = txs.filter(t => U.norm(t.desc).includes(q) || U.norm(t.categoria).includes(q));
       $('#tx-list').innerHTML = tabelaTx(f, 200);
     });
+  }
+
+  /* ---------- SAÍDAS (raio-X de custos) ---------- */
+
+  // Referências de mercado (% do faturamento) para gelateria artesanal / food service
+  const BENCH = [
+    { id: 'cmv', nome: 'CMV (matéria-prima, embalagens, frete)', grupos: ['cmv'], min: 25, max: 35 },
+    { id: 'folha', nome: 'Folha (salários, freelancers, encargos)', grupos: ['folha'], min: 20, max: 30 },
+    { id: 'fixos', nome: 'Fixos e administrativo (aluguel, contabilidade, sistemas, royalty)', grupos: ['fixos'], min: 10, max: 20 },
+    { id: 'ifood', nome: 'Canal iFood (motoboy e taxas)', grupos: ['custoIfood'], min: 0, max: 6 },
+    { id: 'marketing', nome: 'Marketing', grupos: ['marketing'], min: 2, max: 6 },
+    { id: 'impostos', nome: 'Impostos', grupos: ['impostos'], min: 4, max: 10 },
+  ];
+
+  function viewSaidas(main) {
+    const k = mesSelecionado();
+    const mesKey = k || M.mesAtualKey;
+    const m = M.byMonth[mesKey];
+    const prev = mesAnteriorDe(mesKey);
+    if (!m) { main.innerHTML = card('Saídas', '<p class="note">Sem dados no período.</p>'); return; }
+
+    const txs = m.txs.filter(t => t.tipo === 'Saída').sort((a, b) => b.date - a.date);
+    const receita = m.receita || 0;
+    const totalSai = U.sum(txs, t => t.valor);
+    const porCat = {};
+    txs.forEach(t => porCat[t.categoria] = (porCat[t.categoria] || 0) + t.valor);
+    const cats = Object.entries(porCat).sort((a, b) => b[1] - a[1]);
+    const diasMes = m.dias.size || 1;
+
+    /* ---- 1. KPIs ---- */
+    const kpis = `<div class="kpi-grid kpi-grid-4">
+      ${kpiCard({ icon: 'bi-arrow-up-circle', label: 'Saídas em ' + U.ymLabel(mesKey), valor: U.brl(totalSai), deltaPct: prev ? U.delta(totalSai, prev.saidas) : null, invert: true })}
+      ${kpiCard({ icon: 'bi-percent', label: 'Saídas ÷ faturamento', valor: receita ? U.pct(totalSai / receita * 100) : '—', sub: 'abaixo de 100% = mês no azul', invert: true, cls: receita && totalSai > receita ? 'kpi-bad' : '' })}
+      ${kpiCard({ icon: 'bi-cash-stack', label: 'Maior categoria', valor: cats[0] ? U.brlShort(cats[0][1]) : '—', sub: cats[0] ? U.esc(cats[0][0]) + ' (' + (receita ? U.pct(cats[0][1] / receita * 100) : '—') + ' do faturamento)' : '' })}
+      ${kpiCard({ icon: 'bi-calendar-day', label: 'Gasto médio por dia', valor: U.brl(totalSai / diasMes), sub: diasMes + ' dias com lançamentos' })}
+    </div>`;
+
+    /* ---- 2. Raio-X vs referência de gelateria ---- */
+    const grupoTotais = {};
+    for (const t of txs) if (t.grupo) grupoTotais[t.grupo] = (grupoTotais[t.grupo] || 0) + t.valor;
+    let alertasCusto = [];
+    const rowsBench = BENCH.map(b => {
+      const val = U.sum(b.grupos, g => grupoTotais[g] || 0);
+      const pct = receita ? val / receita * 100 : null;
+      const prevVal = prev ? U.sum(b.grupos, g => U.sum(prev.txs.filter(t => t.tipo === 'Saída' && b.grupos.includes(t.grupo)), t => t.valor)) : null;
+      const dPct = prevVal != null && prev.receita ? pct - (prevVal / prev.receita * 100) : null;
+      let status, cls;
+      if (pct == null) { status = '—'; cls = ''; }
+      else if (pct > b.max) { status = 'acima da referência'; cls = 'bad'; alertasCusto.push({ b, pct, val }); }
+      else if (pct < b.min && b.min > 0) { status = 'abaixo'; cls = 'good'; }
+      else { status = 'dentro'; cls = 'ok'; }
+      return `<tr>
+        <td><strong>${b.nome}</strong></td>
+        <td class="mono right">${U.brl(val)}</td>
+        <td class="mono right"><strong>${pct != null ? U.pct(pct) : '—'}</strong>${dPct != null ? ` <span class="dim">(${dPct >= 0 ? '+' : ''}${U.pct(dPct)} vs mês ant.)</span>` : ''}</td>
+        <td class="mono right dim">${b.min}–${b.max}%</td>
+        <td><span class="badge ${cls}">${status}</span></td>
+      </tr>`;
+    }).join('');
+    const semGrupo = totalSai - U.sum(Object.values(grupoTotais));
+    const financ = grupoTotais['financiamento'] || 0;
+
+    const raioX = card('Raio-X: cada grupo vs referência de gelateria (% do faturamento do mês)', `
+      <div class="table-wrap"><table>
+        <thead><tr><th>Grupo</th><th class="right">Gasto no mês</th><th class="right">% faturamento</th><th class="right">Referência</th><th>Status</th></tr></thead>
+        <tbody>${rowsBench}</tbody></table></div>
+      <p class="note">Referências típicas de gelateria artesanal / food service no Brasil — use como bússola, não como lei: mês parcial ou compra grande de estoque distorce o % momentaneamente. ${financ ? 'Financiamentos (Tortelli/Celso) somam ' + U.brl(financ) + ' e ficam fora das referências por serem investimento.' : ''} ${semGrupo > 0 ? 'Outras saídas não classificadas: ' + U.brl(semGrupo - financ > 0 ? semGrupo - financ : 0) + '.' : ''}</p>`);
+
+    /* ---- 3. O que está destoando ---- */
+    let destoando = alertasCusto.map(a => `
+      <div class="alerta warn"><i class="bi bi-exclamation-triangle"></i><div>
+        <strong>${a.b.nome}: ${U.pct(a.pct)} do faturamento (referência: até ${a.b.max}%)</strong>
+        <p>${sugestaoCusto(a.b.id, a)}</p></div></div>`);
+    // categorias com salto vs mês anterior
+    if (prev) {
+      for (const [cat, v] of cats) {
+        const antes = prev.cats[cat]?.sai || 0;
+        if (antes > 200 && v > antes * 1.4 && v - antes > 400) {
+          destoando.push(`<div class="alerta warn"><i class="bi bi-graph-up-arrow"></i><div>
+            <strong>"${U.esc(cat)}" saltou ${U.pct((v / antes - 1) * 100)}</strong>
+            <p>${U.brl(antes)} → ${U.brl(v)} (${U.ymLabel(prev.mes)} → ${U.ymLabel(mesKey)}). Vale abrir os lançamentos abaixo e entender o que puxou.</p></div></div>`);
+        }
+      }
+    }
+    if (!destoando.length) destoando = ['<div class="alerta ok"><i class="bi bi-check-circle"></i><div><strong>Nenhum grupo fora da referência</strong><p>Estrutura de custos saudável para o faturamento do mês.</p></div></div>'];
+
+    /* ---- 4. Gastos recorrentes (assinaturas e compromissos) ---- */
+    const recorr = {};
+    for (const t of M.txs.filter(t => t.tipo === 'Saída')) {
+      const kd = U.norm(t.desc).replace(/\d+/g, '').trim();
+      if (!kd) continue;
+      const r = recorr[kd] || (recorr[kd] = { desc: t.desc, meses: new Set(), total: 0, cat: t.categoria });
+      r.meses.add(t.mes); r.total += t.valor;
+    }
+    const recorrentes = Object.values(recorr)
+      .filter(r => r.meses.size >= 3)
+      .map(r => ({ ...r, media: r.total / r.meses.size }))
+      .sort((a, b) => b.media - a.media).slice(0, 12);
+    const rowsRec = recorrentes.map(r => `<tr>
+      <td>${U.esc(r.desc)} <span class="chip">${U.esc(r.cat)}</span></td>
+      <td class="mono right">${r.meses.size} meses</td>
+      <td class="mono right"><strong>${U.brl(r.media)}</strong>/mês</td>
+      <td class="mono right dim">${U.brl(r.media * 12)}/ano</td></tr>`).join('');
+
+    /* ---- 5. Maiores saídas individuais ---- */
+    const topTx = txs.slice().sort((a, b) => b.valor - a.valor).slice(0, 8);
+    const rowsTop = topTx.map(t => `<tr><td class="mono">${U.fmtDate(t.date)}</td><td>${U.esc(t.desc)}</td><td><span class="chip">${U.esc(t.categoria)}</span></td><td class="mono right neg">${U.brl(t.valor)}</td></tr>`).join('');
+
+    /* ---- monta a tela ---- */
+    main.innerHTML = `
+      ${kpis}
+      ${raioX}
+      ${card('O que está destoando', `<div class="alerta-list">${destoando.join('')}</div>`)}
+      <div class="grid-2">
+        ${card('Saídas por categoria — ' + U.ymLabel(mesKey), '<div class="chart-box tall"><canvas id="ch-sd-cat"></canvas></div>')}
+        ${card('Evolução dos 5 maiores grupos', '<div class="chart-box tall"><canvas id="ch-sd-evo"></canvas></div>')}
+      </div>
+      ${card('Gastos recorrentes (aparecem em 3+ meses)', recorrentes.length ? `<div class="table-wrap"><table>
+        <thead><tr><th>Descrição</th><th class="right">Frequência</th><th class="right">Média</th><th class="right">Projeção anual</th></tr></thead>
+        <tbody>${rowsRec}</tbody></table></div>
+        <p class="note">Compromissos que se repetem todo mês — o melhor lugar para caçar redução de custo fixo: renegociar, trocar de fornecedor ou cancelar o que não usa mais.</p>` : '<p class="note">Nenhum gasto recorrente identificado ainda.</p>')}
+      ${card('Maiores saídas de ' + U.ymLabelFull(mesKey), `<div class="table-wrap"><table><thead><tr><th>Data</th><th>Descrição</th><th>Categoria</th><th class="right">Valor</th></tr></thead><tbody>${rowsTop}</tbody></table></div>`)}
+      ${card('Todos os lançamentos', `<input id="busca-Saída" class="input busca" type="search" placeholder="Buscar descrição ou categoria…"><div id="tx-list">${tabelaTx(txs, 200)}</div>`)}`;
+
+    // gráficos
+    const p = DB.charts.palette();
+    DB.charts.barrasHoriz('ch-sd-cat', cats.slice(0, 10).map(c => c[0]), cats.slice(0, 10).map(c => c[1]), p.amarena);
+    const gruposEvo = ['cmv', 'folha', 'fixos', 'custoIfood', 'impostos'];
+    const nomesEvo = { cmv: 'CMV', folha: 'Folha', fixos: 'Fixos', custoIfood: 'iFood', impostos: 'Impostos' };
+    DB.charts.barras('ch-sd-evo', M.meses.map(U.ymLabel), gruposEvo.map((g, i) => ({
+      label: nomesEvo[g],
+      data: M.meses.map(mk => U.sum(M.byMonth[mk].txs.filter(t => t.tipo === 'Saída' && t.grupo === g), t => t.valor)),
+      color: p.series[i],
+    })));
+
+    $('#busca-Saída').addEventListener('input', e => {
+      const q = U.norm(e.target.value);
+      const f = txs.filter(t => U.norm(t.desc).includes(q) || U.norm(t.categoria).includes(q));
+      $('#tx-list').innerHTML = tabelaTx(f, 200);
+    });
+  }
+
+  /** Sugestões específicas por grupo estourado */
+  function sugestaoCusto(id, a) {
+    const dicas = {
+      cmv: 'Caminhos: renegociar os 3 maiores fornecedores de matéria-prima, revisar porcionamento (o custo/cuba em Cubas & Sabores mostra os sabores caros), medir perdas/quebras e priorizar na vitrine sabores de maior margem.',
+      folha: 'Compare a escala com o movimento real: os dados da maquininha mostram que sábado e domingo vendem 4–5× mais que meio de semana — concentre freelancers no fim de semana e enxugue dias fracos.',
+      fixos: 'Revise os itens da tabela de gastos recorrentes abaixo: contratos de sistema, contabilidade e serviços costumam ter margem de renegociação anual.',
+      ifood: 'O custo do canal está pesado para o faturamento. Avalie repassar parte da taxa no preço do cardápio iFood ou incentivar retirada/balcão (o cruzamento em Cartões mostra a economia por venda migrada).',
+      marketing: 'Gasto acima da faixa: confira o ROI na aba Marketing e concentre verba nas campanhas com retorno comprovado.',
+      impostos: 'Acima da faixa típica do Simples para o setor — vale uma conversa com a contabilidade sobre enquadramento e créditos.',
+    };
+    return dicas[id] || 'Analise os lançamentos da categoria para entender o que puxou o gasto.';
   }
 
   function viewBoletos(main) {
