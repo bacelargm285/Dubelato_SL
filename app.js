@@ -10,6 +10,7 @@
   let INV = null;        // estoque
   let CUBAS = null;      // custos de produção
   let GETNET = null;     // dados da maquininha (localStorage)
+  let PROD = null;       // produção de cubas
   let GAN = null;        // análise getnet
   let ALERTAS = [];
   let mesFiltro = 'atual';   // 'atual' | '2026-03' | 'todos'
@@ -85,6 +86,7 @@
     M = DB.finance.build(RAW, { tortelliComoInvestimento: tortelliInvest, hoje: new Date() });
     INV = RAW.estoque.length ? DB.inventory.build(RAW.estoque) : null;
     CUBAS = DB.cubas.build(RAW.cubas);
+    PROD = RAW.producao && RAW.producao.length ? DB.producao.build(RAW.producao, CUBAS) : null;
     GETNET = DB.getnet.carregar();
     GAN = GETNET ? DB.getnet.analisar(GETNET, M) : null;
     // busca a versão publicada no repositório (visível para todos os sócios)
@@ -176,7 +178,7 @@
       const fn = {
         dashboard: viewDashboard, fluxo: viewFluxo, entradas: () => viewLancamentos('Entrada'),
         saidas: () => viewLancamentos('Saída'), boletos: viewBoletos, estoque: viewEstoque,
-        ifood: viewIfood, funcionarios: viewFuncionarios, marketing: viewMarketing, cubas: viewCubas, getnet: viewGetnet,
+        ifood: viewIfood, funcionarios: viewFuncionarios, marketing: viewMarketing, cubas: viewCubas, getnet: viewGetnet, producao: viewProducao,
         comparativos: viewComparativos, consultoria: viewConsultoria, alertas: viewAlertas, config: viewConfig,
       }[viewAtual] || viewDashboard;
       main.innerHTML = '';
@@ -826,6 +828,80 @@
       inp.addEventListener('change', e => { if (e.target.files.length) processarPdfsGetnet([...e.target.files]); inp.value = ''; });
     }
     btn.addEventListener('click', () => inp.click());
+  }
+
+  /* ---------- PRODUÇÃO DE CUBAS ---------- */
+
+  function viewProducao(main) {
+    if (!PROD) {
+      main.innerHTML = card('Produção de cubas', `<p class="note">Nenhuma aba de produção reconhecida (colunas <strong>Data | Sabor | Produtor | Quantidade</strong>). Adicione a aba <code>Producao_Cubas</code> na planilha principal — registros novos podem ser acrescentados nela mesma ou em abas novas no mesmo formato.</p>`);
+      return;
+    }
+    const P = PROD;
+    const mesAtual = P.meses[P.meses.length - 1];
+    const mAtual = P.porMes[mesAtual];
+    const mesAnt = P.meses[P.meses.length - 2];
+    const lider = P.sabores[0];
+
+    const kpis = `<div class="kpi-grid kpi-grid-4">
+      ${kpiCard({ icon: 'bi-snow2', label: 'Cubas produzidas (total)', valor: String(Math.round(P.totalGeral)), sub: P.meses.length + ' meses registrados' })}
+      ${kpiCard({ icon: 'bi-calendar3', label: 'Cubas em ' + U.ymLabel(mesAtual), valor: String(Math.round(mAtual.total)), deltaPct: mesAnt ? U.delta(mAtual.total, P.porMes[mesAnt].total) : null, sub: mAtual.sabores.size + ' sabores no mês' })}
+      ${kpiCard({ icon: 'bi-trophy', label: 'Sabor líder', valor: U.esc(lider.nome), sub: Math.round(lider.total) + ' cubas (' + U.pct(lider.total / P.totalGeral * 100) + ' do total)' })}
+      ${kpiCard({ icon: 'bi-collection', label: 'Concentração (Pareto)', valor: P.pareto80 + ' sabores', sub: 'respondem por 80% da produção' })}
+    </div>`;
+
+    // heatmap sazonalidade: top 12 sabores × meses
+    const top = P.sabores.slice(0, 12);
+    const maxCel = Math.max(...top.flatMap(s => P.meses.map(m => s.porMes[m] || 0)), 1);
+    const headMeses = P.meses.map(m => `<th class="right">${U.ymLabel(m)}</th>`).join('');
+    const rowsHeat = top.map(s => {
+      const cels = P.meses.map(m => {
+        const v = s.porMes[m] || 0;
+        const al = v ? (0.12 + 0.55 * v / maxCel).toFixed(2) : 0;
+        return `<td class="right mono" style="${v ? `background:rgba(143,188,127,${al});border-radius:6px;` : ''}">${v ? Math.round(v) : '·'}</td>`;
+      }).join('');
+      return `<tr><td><strong>${U.esc(s.nome)}</strong></td>${cels}<td class="right mono"><strong>${Math.round(s.total)}</strong></td></tr>`;
+    }).join('');
+
+    // produtores
+    const prods = Object.entries(P.porProdutor).sort((a, b) => b[1] - a[1]);
+    const rowsProd = prods.map(([nome, q]) => `<tr><td>${U.esc(nome)}</td><td class="mono right">${Math.round(q)}</td><td class="mono right dim">${U.pct(q / P.totalGeral * 100)}</td></tr>`).join('');
+
+    // grafias divergentes (higiene de dados)
+    const bagunca = P.sabores.filter(s => s.grafias.size > 1).slice(0, 6);
+    const cardGrafias = bagunca.length ? card('Grafias unificadas automaticamente', `<p class="note">O sistema agrupou variações do mesmo sabor. Se quiser, padronize na planilha:</p>
+      <ul class="note-list">${bagunca.map(s => `<li><strong>${U.esc(s.nome)}</strong>: ${[...s.grafias].slice(0, 4).map(g => `"${U.esc(g)}"`).join(', ')}${s.grafias.size > 4 ? '…' : ''}</li>`).join('')}</ul>`) : '';
+
+    // custo estimado de produção (sabores com receita)
+    let cardCusto = '';
+    if (P.custoMatch && P.custoMatch.length && mAtual) {
+      const linhas = P.custoMatch
+        .map(({ sabor, rec }) => ({ sabor, rec, qtdMes: sabor.porMes[mesAtual] || 0 }))
+        .filter(x => x.qtdMes > 0)
+        .map(x => `<tr><td>${U.esc(x.sabor.nome)}</td><td class="mono right">${Math.round(x.qtdMes)}</td><td class="mono right">${U.brl(x.rec.c8000.custoTotal)}</td><td class="mono right"><strong>${U.brl(x.qtdMes * x.rec.c8000.custoTotal)}</strong></td></tr>`).join('');
+      if (linhas) cardCusto = card('Custo estimado de produção — ' + U.ymLabelFull(mesAtual) + ' (cuba 8.000 ml)', `
+        <div class="table-wrap"><table><thead><tr><th>Sabor</th><th class="right">Cubas</th><th class="right">Custo/cuba</th><th class="right">Total</th></tr></thead><tbody>${linhas}</tbody></table></div>
+        <p class="note">Somente sabores com receita cadastrada em <strong>Cubas &amp; Sabores</strong>. Cadastre as receitas dos demais para o custo de produção completo do mês.</p>`);
+    }
+
+    main.innerHTML = `
+      ${kpis}
+      <div class="grid-2">
+        ${card('Ranking de sabores (top 15)', '<div class="chart-box tall"><canvas id="ch-pr-rank"></canvas></div>')}
+        ${card('Cubas produzidas por mês', '<div class="chart-box tall"><canvas id="ch-pr-mes"></canvas></div>' )}
+      </div>
+      ${card('Sazonalidade — sabor × mês (top 12)', `<div class="table-wrap"><table><thead><tr><th>Sabor</th>${headMeses}<th class="right">Total</th></tr></thead><tbody>${rowsHeat}</tbody></table></div>
+        <p class="note">Célula mais verde = mais cubas naquele mês. Março não tem registros (controle não foi feito).</p>`)}
+      ${cardCusto}
+      <div class="grid-2">
+        ${card('Por produtor', `<div class="table-wrap"><table><thead><tr><th>Produtor</th><th class="right">Cubas</th><th class="right">%</th></tr></thead><tbody>${rowsProd}</tbody></table></div>`)}
+        ${cardGrafias || card('Dica', '<p class="note">Para o ranking refletir vendas com precisão, registre a produção sempre que uma cuba nova vai para a vitrine — produção repõe o que vendeu.</p>')}
+      </div>`;
+
+    const p = DB.charts.palette();
+    const top15 = P.sabores.slice(0, 15);
+    DB.charts.barrasHoriz('ch-pr-rank', top15.map(s => s.nome), top15.map(s => s.total), p.pistache);
+    DB.charts.barras('ch-pr-mes', P.meses.map(U.ymLabel), [{ label: 'Cubas', data: P.meses.map(m => P.porMes[m].total), color: p.gold }]);
   }
 
   function viewConsultoria(main) {

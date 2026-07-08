@@ -312,6 +312,37 @@ DB.excel = (function () {
     return { receitas: Object.values(receitas), precos, produtos };
   }
 
+  /* ---------- 6. PRODUÇÃO DE CUBAS (Data | Sabor | Produtor | Quantidade) ---------- */
+
+  function parseProducao(ws, sheetName) {
+    const rows = grid(ws);
+    let h = null;
+    for (let i = 0; i < Math.min(rows.length, 5); i++) {
+      const c = {};
+      (rows[i] || []).forEach((cell, j) => {
+        const n = U.norm(cell);
+        if (n === 'data') c.data = j;
+        else if (n === 'sabor') c.sabor = j;
+        else if (n === 'produtor' || n === 'responsavel') c.produtor = j;
+        else if (n.startsWith('quantidade') || n === 'qtd') c.qtd = j;
+      });
+      if (c.data != null && c.sabor != null && c.qtd != null) { h = { rowIdx: i, c }; break; }
+    }
+    if (!h) return null;
+    const { c } = h;
+    const itens = [];
+    for (let i = h.rowIdx + 1; i < rows.length; i++) {
+      const r = rows[i]; if (!r) continue;
+      const data = U.toDate(r[c.data]);
+      const sabor = String(r[c.sabor] ?? '').trim();
+      const qtd = U.toNum(r[c.qtd]);
+      if (!data || !sabor || qtd == null || qtd <= 0) continue;
+      if (data.getFullYear() < 2020) continue; // linhas fantasma (1899…)
+      itens.push({ data, mes: U.ymKey(data), sabor, produtor: String(r[c.produtor] ?? '').trim(), qtd, aba: sheetName });
+    }
+    return itens.length >= 3 ? itens : null;
+  }
+
   /* ---------- ORQUESTRAÇÃO ---------- */
 
   /**
@@ -319,7 +350,7 @@ DB.excel = (function () {
    * não pelo nome. Retorna o modelo de dados bruto.
    */
   function parseWorkbook(wb) {
-    const model = { txs: [], estoque: [], boletos: [], cartao: [], cubas: null, abas: [], avisos: [] };
+    const model = { txs: [], estoque: [], boletos: [], cartao: [], cubas: null, producao: [], abas: [], avisos: [] };
     const nomes = wb.SheetNames;
 
     // 1ª passada: lançamentos (para descobrir o ano de referência dos boletos)
@@ -340,6 +371,9 @@ DB.excel = (function () {
         if (ct) { model.cartao.push(...ct); model.abas.push({ name, tipo: `cartão (${ct.length} lançamentos)` }); continue; }
       }
       if (n.includes('boleto')) continue; // 2ª passada
+      // produção de cubas (Data|Sabor|Quantidade) — testa antes dos lançamentos
+      const prod = parseProducao(ws, name);
+      if (prod) { model.producao.push(...prod); model.abas.push({ name, tipo: `produção de cubas (${prod.length} registros)` }); continue; }
       const txs = parseTransactions(ws, name);
       if (txs) { model.txs.push(...txs); model.abas.push({ name, tipo: `lançamentos (${txs.length})` }); }
       else model.abas.push({ name, tipo: 'não reconhecida' });

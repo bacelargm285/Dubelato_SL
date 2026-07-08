@@ -43,3 +43,12 @@ Após carregar os CSVs/PDFs, clique em **Baixar arquivo para publicar no
 GitHub** e suba o `getnet_dados.json` gerado na raiz do repositório
 (substituindo o anterior). O site carrega esse arquivo automaticamente
 para qualquer pessoa que abrir o link.
+
+## Produção de cubas
+
+A aba **Producao_Cubas** da planilha registra a produção diária:
+`Data | Sabor | Produtor | Quantidade`. Acrescente linhas nela mesma
+(ou crie abas novas no mesmo formato — são detectadas sozinhas).
+O menu **Produção** mostra ranking de sabores, sazonalidade mês a mês,
+divisão por produtor e custo estimado (sabores com receita cadastrada).
+Grafias diferentes do mesmo sabor são unificadas automaticamente.
