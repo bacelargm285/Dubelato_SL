@@ -17,12 +17,13 @@ DB.charts = (function () {
     return {
       text: cssVar('--tx-2'),
       grid: cssVar('--grid'),
-      amarena: cssVar('--amarena'),
-      pistache: cssVar('--pistache'),
+      amarena: cssVar('--amarena'),   // berry — saídas/negativos
+      pistache: cssVar('--pistache'), // teal Dubelato — receitas/positivos
+      gold: cssVar('--gold'),
+      blue: cssVar('--blue'),
+      purple: cssVar('--purple'),
       creme: cssVar('--gold'),
-      azul: cssVar('--blue'),
-      roxo: cssVar('--purple'),
-      series: [cssVar('--pistache'), cssVar('--amarena'), cssVar('--gold'), cssVar('--blue'), cssVar('--purple'), '#e8927c', '#6fc2c7', '#c9a0dc', '#9fb668', '#d4787f'],
+      series: [cssVar('--pistache'), cssVar('--amarena'), cssVar('--gold'), cssVar('--blue'), cssVar('--purple'), '#b07f4a', '#9fd0ca', '#5e8f8a', '#d3a55c', '#94a8c4'],
     };
   }
 

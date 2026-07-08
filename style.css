@@ -1,63 +1,76 @@
 /* ============================================================
    Dubelato BI — style.css
-   Identidade: "amarena & pistache" — cacau profundo no escuro,
-   creme de leite no claro. Glassmorphism discreto, tipografia
-   Fraunces (display) + Inter (texto).
+   Identidade visual da loja: branco luminoso, verde Dubelato
+   (logo), listras de toldo petróleo, madeira/dourado quente,
+   arcos das janelas. "Il gelato rende felici."
    ============================================================ */
 
 :root {
-  --amarena: #e0475f;
-  --pistache: #8fbc7f;
-  --gold: #d9a84e;
-  --blue: #6b9bd1;
-  --purple: #a583c9;
+  /* cores da marca */
+  --teal: #1f8a80;        /* verde Dubelato (logo) */
+  --teal-deep: #14615b;   /* listras petróleo da parede */
+  --mint: #7ac7bf;        /* menta clara (balões/copos) */
+  --gold: #c0913f;        /* letreiro dourado / madeira */
+  --berry: #d94f5c;       /* alerta / saídas */
+  --navy: #3d6b9e;
+
+  /* aliases usados pelos gráficos (mantêm compatibilidade) */
+  --pistache: var(--teal);
+  --amarena: var(--berry);
+  --blue: var(--navy);
+  --purple: var(--mint);
 
   --radius: 18px;
   --radius-sm: 12px;
-  --shadow: 0 10px 30px rgba(0,0,0,.28);
   --sidebar-w: 248px;
   --transition: .22s cubic-bezier(.4,0,.2,1);
+
+  /* listras de toldo (assinatura) */
+  --stripes: repeating-linear-gradient(90deg,
+      var(--teal-deep) 0 14px, transparent 14px 32px);
 }
 
-/* -------- tema escuro (padrão): cacau -------- */
-:root[data-theme="dark"] {
-  --bg-0: #14100d;
-  --bg-1: #1b1613;
-  --surface: rgba(255,255,255,.045);
-  --surface-2: rgba(255,255,255,.08);
-  --glass: rgba(27,22,19,.72);
-  --line: rgba(255,255,255,.09);
-  --grid: rgba(255,255,255,.06);
-  --tx-1: #f4ede6;
-  --tx-2: #b8aca1;
-  --tx-3: #7d726a;
-  --tooltip-bg: rgba(26,21,18,.95);
-  --pos: #9ed48b;
-  --neg: #f2718a;
-  --warn: #e6b566;
-  --glow: radial-gradient(1200px 500px at 85% -10%, rgba(224,71,95,.12), transparent 60%),
-          radial-gradient(900px 420px at -10% 20%, rgba(143,188,127,.10), transparent 55%);
-}
-
-/* -------- tema claro: creme -------- */
+/* -------- tema claro (padrão): a loja -------- */
 :root[data-theme="light"] {
-  --bg-0: #f7f2ea;
-  --bg-1: #fffdf9;
-  --surface: rgba(255,255,255,.75);
-  --surface-2: rgba(20,16,13,.05);
-  --glass: rgba(255,253,249,.8);
-  --line: rgba(20,16,13,.1);
-  --grid: rgba(20,16,13,.07);
-  --tx-1: #241d18;
-  --tx-2: #5c534b;
-  --tx-3: #96897e;
-  --tooltip-bg: rgba(255,255,255,.97);
-  --pos: #4d8a3f;
-  --neg: #c22b48;
+  --bg-0: #f7f4ee;
+  --bg-1: #ffffff;
+  --surface: rgba(255,255,255,.86);
+  --surface-2: rgba(20,60,56,.05);
+  --glass: rgba(255,255,255,.85);
+  --line: rgba(20,60,56,.12);
+  --grid: rgba(20,60,56,.08);
+  --tx-1: #1c2b29;
+  --tx-2: #4d615e;
+  --tx-3: #8aa09c;
+  --tooltip-bg: rgba(255,255,255,.98);
+  --pos: #1f8a80;
+  --neg: #c43a49;
   --warn: #a3701c;
-  --shadow: 0 10px 28px rgba(60,40,20,.1);
-  --glow: radial-gradient(1100px 480px at 88% -12%, rgba(224,71,95,.08), transparent 60%),
-          radial-gradient(900px 420px at -8% 18%, rgba(143,188,127,.12), transparent 55%);
+  --shadow: 0 10px 26px rgba(20,97,91,.09);
+  --glow: radial-gradient(1100px 480px at 88% -12%, rgba(31,138,128,.09), transparent 60%),
+          radial-gradient(900px 420px at -8% 18%, rgba(192,145,63,.08), transparent 55%);
+}
+
+/* -------- tema escuro: a gelateria à noite (petróleo) -------- */
+:root[data-theme="dark"] {
+  --bg-0: #0e1f1d;
+  --bg-1: #122825;
+  --surface: rgba(255,255,255,.05);
+  --surface-2: rgba(255,255,255,.09);
+  --glass: rgba(14,33,31,.78);
+  --line: rgba(255,255,255,.1);
+  --grid: rgba(255,255,255,.07);
+  --tx-1: #eef5f3;
+  --tx-2: #a8bfbb;
+  --tx-3: #6d8a85;
+  --tooltip-bg: rgba(12,28,26,.96);
+  --pos: #6fc7bd;
+  --neg: #f28591;
+  --warn: #e0b76c;
+  --shadow: 0 10px 30px rgba(0,0,0,.32);
+  --glow: radial-gradient(1200px 500px at 85% -10%, rgba(31,138,128,.16), transparent 60%),
+          radial-gradient(900px 420px at -10% 20%, rgba(192,145,63,.09), transparent 55%);
+  --mint: #6fc7bd;
 }
 
 * { box-sizing: border-box; }
@@ -77,7 +90,7 @@ body {
 
 h1, h2, h3 { font-family: 'Fraunces', Georgia, serif; font-weight: 600; letter-spacing: -.01em; }
 
-a { color: var(--pistache); }
+a { color: var(--teal); }
 code { background: var(--surface-2); border-radius: 6px; padding: 1px 6px; font-size: .85em; }
 
 .hidden { display: none !important; }
@@ -90,7 +103,7 @@ code { background: var(--surface-2); border-radius: 6px; padding: 1px 6px; font-
 
 .input {
   width: 100%;
-  background: var(--surface);
+  background: var(--bg-1);
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   color: var(--tx-1);
@@ -99,7 +112,7 @@ code { background: var(--surface-2); border-radius: 6px; padding: 1px 6px; font-
   outline: none;
   transition: border-color var(--transition);
 }
-.input:focus { border-color: var(--amarena); }
+.input:focus { border-color: var(--teal); }
 
 /* -------- splash / upload -------- */
 #splash {
@@ -116,27 +129,49 @@ code { background: var(--surface-2); border-radius: 6px; padding: 1px 6px; font-
   backdrop-filter: blur(18px);
   border: 1px solid var(--line);
   border-radius: 26px;
-  padding: 46px 34px;
+  padding: 0 34px 46px;
   box-shadow: var(--shadow);
   animation: rise .5s ease both;
+  overflow: hidden;
 }
+.splash-stripes {
+  height: 16px;
+  margin: 0 -34px 38px;
+  background: var(--stripes);
+  opacity: .85;
+}
+
+/* logo: disco branco com casquinha Dubelato */
 .logo-scoop {
   width: 64px; height: 64px;
-  margin: 0 auto 16px;
-  border-radius: 50% 50% 46% 46%;
-  background: conic-gradient(from 210deg, var(--amarena), #f0788d 40%, var(--pistache) 75%, var(--amarena));
-  box-shadow: inset 0 -10px 18px rgba(0,0,0,.25), 0 8px 24px rgba(224,71,95,.35);
+  margin: 0 auto 14px;
+  border-radius: 50%;
+  background: #fff;
+  border: 1px solid var(--line);
+  box-shadow: 0 6px 18px rgba(20,97,91,.18);
   position: relative;
+}
+.logo-scoop::before {
+  content: '';
+  position: absolute; left: 50%; top: 12px; transform: translateX(-50%);
+  width: 30px; height: 26px;
+  border-radius: 50% 50% 44% 44%;
+  background: linear-gradient(160deg, var(--mint), var(--teal) 70%);
+  box-shadow: inset 0 -5px 8px rgba(0,0,0,.14);
 }
 .logo-scoop::after {
   content: '';
-  position: absolute; left: 50%; bottom: -14px; transform: translateX(-50%);
-  border-left: 15px solid transparent; border-right: 15px solid transparent;
-  border-top: 18px solid var(--gold);
-  filter: brightness(.9);
+  position: absolute; left: 50%; top: 34px; transform: translateX(-50%);
+  border-left: 11px solid transparent; border-right: 11px solid transparent;
+  border-top: 17px solid var(--gold);
 }
-.splash-card h1 { font-size: 30px; margin: 18px 0 6px; }
-.splash-card .sub { color: var(--tx-2); margin: 0 0 26px; }
+.splash-card h1 { font-size: 30px; margin: 14px 0 2px; color: var(--teal-deep); }
+:root[data-theme="dark"] .splash-card h1 { color: var(--mint); }
+.splash-card .sub { color: var(--tx-2); margin: 0 0 6px; }
+.tagline {
+  font-family: 'Fraunces', serif; font-style: italic;
+  color: var(--gold); font-size: 15px; margin: 0 0 26px;
+}
 
 #drop-zone {
   border: 1.6px dashed var(--line);
@@ -145,9 +180,10 @@ code { background: var(--surface-2); border-radius: 6px; padding: 1px 6px; font-
   cursor: pointer;
   color: var(--tx-2);
   transition: var(--transition);
+  background: var(--bg-1);
 }
-#drop-zone:hover, #drop-zone.drag { border-color: var(--amarena); background: var(--surface); color: var(--tx-1); }
-#drop-zone i { font-size: 30px; display: block; margin-bottom: 8px; color: var(--amarena); }
+#drop-zone:hover, #drop-zone.drag { border-color: var(--teal); background: var(--surface-2); color: var(--tx-1); }
+#drop-zone i { font-size: 30px; display: block; margin-bottom: 8px; color: var(--teal); }
 .splash-hint { font-size: 12.5px; color: var(--tx-3); margin-top: 18px; }
 
 @keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }

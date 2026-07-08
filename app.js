@@ -126,7 +126,7 @@
   }
 
   function initTheme() {
-    const saved = localStorage.getItem('db_theme') || 'dark';
+    const saved = localStorage.getItem('db_theme') || 'light';
     document.documentElement.dataset.theme = saved;
     $('#btn-theme').addEventListener('click', () => {
       const t = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
@@ -1052,7 +1052,7 @@
       const cels = P.meses.map(m => {
         const v = s.porMes[m] || 0;
         const al = v ? (0.12 + 0.55 * v / maxCel).toFixed(2) : 0;
-        return `<td class="right mono" style="${v ? `background:rgba(143,188,127,${al});border-radius:6px;` : ''}">${v ? Math.round(v) : '·'}</td>`;
+        return `<td class="right mono" style="${v ? `background:rgba(31,138,128,${al});border-radius:6px;` : ''}">${v ? Math.round(v) : '·'}</td>`;
       }).join('');
       return `<tr><td><strong>${U.esc(s.nome)}</strong></td>${cels}<td class="right mono"><strong>${Math.round(s.total)}</strong></td></tr>`;
     }).join('');
