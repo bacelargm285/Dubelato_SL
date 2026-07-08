@@ -714,7 +714,8 @@
         <thead><tr><th>Bandeira</th><th>Bruto</th><th>Taxas</th><th>Taxa média</th><th>Crédito</th><th>Débito</th></tr></thead>
         <tbody>${rowsBand}</tbody></table></div>
         <p class="note">Crédito custa ${U.pct(A.porMod['Crédito'] ? A.porMod['Crédito'].taxa / A.porMod['Crédito'].bruto * 100 : null, 2)} e débito ${U.pct(A.porMod['Débito'] ? A.porMod['Débito'].taxa / A.porMod['Débito'].bruto * 100 : null, 2)}. PIX na maquininha é isento — cada 1% de vendas migrando de crédito para PIX economiza ~${U.brl(A.cartaoBruto * 0.01 * (A.taxaMediaPct / 100))} no período.</p>`)}
-      ${card('Recebíveis por semana (agenda)', '<div class="chart-box"><canvas id="ch-gn-receb"></canvas></div>')}
+      ${card('Agenda de recebimentos — calendário', montarCalendarioGetnet(A))}
+      ${card('Próximos recebimentos, dia a dia', montarTabelaRecebimentos(A))}
       ${A.cruzamento.length ? card('Cruzamento: planilha × maquininha', `<div class="table-wrap"><table>
         <thead><tr><th>Mês</th><th>Vendas na planilha (balcão)</th><th>Getnet (cartão + PIX)</th><th>Diferença (≈ dinheiro)</th></tr></thead>
         <tbody>${rowsCruz}</tbody></table></div>
@@ -737,10 +738,81 @@
     const nomesDias = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
     const mediaDow = A.porDiaSemana.map(d => d.dias.size ? d.bruto / d.dias.size : 0);
     DB.charts.barras('ch-gn-dow', nomesDias, [{ label: 'Venda média/dia', data: mediaDow, color: p.gold }]);
-    const semanas = Object.keys(A.recebPorSemana).sort();
-    DB.charts.barras('ch-gn-receb', semanas.map(k => 'sem. ' + A.recebPorSemana[k].label), [
-      { label: 'A receber', data: semanas.map(k => A.recebPorSemana[k].total), color: p.purple },
-    ]);
+
+    // navegação do calendário
+    $$('.cal-nav').forEach(b => b.addEventListener('click', () => { calMesGetnet = b.dataset.mes; render(); }));
+  }
+
+  /* --- calendário de recebimentos --- */
+
+  let calMesGetnet = null; // "2026-07"
+
+  function mesesDoCalendario(A) {
+    const set = new Set(Object.keys(A.recebPorDia).map(k => k.slice(0, 7)));
+    return [...set].sort();
+  }
+
+  function montarCalendarioGetnet(A) {
+    const meses = mesesDoCalendario(A);
+    if (!meses.length) return '<p class="note">Sem recebimentos futuros na agenda carregada.</p>';
+    if (!calMesGetnet || !meses.includes(calMesGetnet)) calMesGetnet = meses[0];
+    const [y, mo] = calMesGetnet.split('-').map(Number);
+    const hoje = new Date();
+    const primeiroDia = new Date(y, mo - 1, 1);
+    const diasNoMes = new Date(y, mo, 0).getDate();
+    const inicioGrade = primeiroDia.getDay(); // 0=Dom
+
+    const idx = meses.indexOf(calMesGetnet);
+    const nav = `
+      <div class="cal-head">
+        <button class="cal-nav top-btn" data-mes="${meses[idx - 1] || calMesGetnet}" ${idx === 0 ? 'disabled' : ''}><i class="bi bi-chevron-left"></i></button>
+        <strong>${U.ymLabelFull(calMesGetnet)}</strong>
+        <button class="cal-nav top-btn" data-mes="${meses[idx + 1] || calMesGetnet}" ${idx === meses.length - 1 ? 'disabled' : ''}><i class="bi bi-chevron-right"></i></button>
+        <span class="dim" style="margin-left:auto">total do mês: <strong>${U.brl(U.sum(Object.entries(A.recebPorDia).filter(([k]) => k.startsWith(calMesGetnet)), ([, d]) => d.total))}</strong></span>
+      </div>`;
+
+    const cab = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'].map(d => `<div class="cal-dow">${d}</div>`).join('');
+    let celulas = '';
+    for (let i = 0; i < inicioGrade; i++) celulas += '<div class="cal-cell vazia"></div>';
+    // intensidade de cor proporcional ao maior dia do mês
+    const doMes = Object.entries(A.recebPorDia).filter(([k]) => k.startsWith(calMesGetnet));
+    const maxDia = Math.max(1, ...doMes.map(([, d]) => d.total));
+    for (let dia = 1; dia <= diasNoMes; dia++) {
+      const k = calMesGetnet + '-' + String(dia).padStart(2, '0');
+      const d = A.recebPorDia[k];
+      const ehHoje = hoje.getFullYear() === y && hoje.getMonth() === mo - 1 && hoje.getDate() === dia;
+      if (d) {
+        const alpha = 0.12 + 0.5 * (d.total / maxDia);
+        const detalhe = Object.entries(d.bandeiras).map(([b, v]) => `${b}: ${U.brl(v)}`).join(' · ');
+        celulas += `<div class="cal-cell com-valor ${ehHoje ? 'hoje' : ''}" style="--al:${alpha.toFixed(2)}" title="${U.esc(detalhe)}">
+          <span class="cal-dia">${dia}</span><span class="cal-valor">${U.brlShort(d.total)}</span></div>`;
+      } else {
+        celulas += `<div class="cal-cell ${ehHoje ? 'hoje' : ''}"><span class="cal-dia">${dia}</span></div>`;
+      }
+    }
+    return nav + `<div class="cal-grid">${cab}${celulas}</div>
+      <p class="note dim">Toque/passe o mouse num dia para ver a divisão por bandeira. Dias em branco não têm repasse previsto (a Getnet consolida crédito em D+30 útil; fins de semana caem no próximo dia útil).</p>`;
+  }
+
+  function montarTabelaRecebimentos(A) {
+    const dias = Object.values(A.recebPorDia).sort((a, b) => a.data - b.data);
+    if (!dias.length) return '<p class="note">Sem recebimentos futuros.</p>';
+    const nomesDias = ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado'];
+    let acumulado = 0;
+    const rows = dias.map(d => {
+      acumulado += d.total;
+      const chips = Object.entries(d.bandeiras).sort((a, b) => b[1] - a[1])
+        .map(([b, v]) => `<span class="chip">${b} ${U.brlShort(v)}</span>`).join(' ');
+      return `<tr>
+        <td class="mono"><strong>${U.fmtDate(d.data)}</strong> <span class="dim">${nomesDias[d.data.getDay()]}</span></td>
+        <td>${chips}</td>
+        <td class="mono right pos"><strong>${U.brl(d.total)}</strong></td>
+        <td class="mono right dim">${U.brl(acumulado)}</td>
+      </tr>`;
+    }).join('');
+    return `<div class="table-wrap"><table>
+      <thead><tr><th>Dia</th><th>Bandeiras</th><th class="right">Valor do dia</th><th class="right">Acumulado</th></tr></thead>
+      <tbody>${rows}</tbody></table></div>`;
   }
 
   function ligarUploadGetnet() {

@@ -223,3 +223,32 @@ tr:hover td { background: var(--surface-2); }
 .cuba-btn.active { background: linear-gradient(120deg, rgba(224,71,95,.22), rgba(143,188,127,.18)); color: var(--tx-1); border-color: var(--amarena); }
 .cuba-hint { margin-left: auto; font-size: 12px; }
 @media (max-width: 820px) { .cuba-hint { margin-left: 0; width: 100%; } }
+
+/* -------- calendário de recebimentos -------- */
+.cal-head { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
+.cal-head strong { font-family: 'Fraunces', serif; font-size: 16px; }
+.cal-nav[disabled] { opacity: .35; cursor: default; }
+.cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
+.cal-dow { text-align: center; font-size: 11px; letter-spacing: .08em; color: var(--tx-3); padding: 4px 0; }
+.cal-cell {
+  min-height: 64px; border-radius: 12px;
+  border: 1px solid var(--grid);
+  padding: 7px 8px;
+  display: flex; flex-direction: column; justify-content: space-between;
+  background: var(--surface);
+}
+.cal-cell.vazia { background: transparent; border-color: transparent; }
+.cal-cell.com-valor {
+  background: linear-gradient(160deg, rgba(143,188,127,var(--al,.2)), rgba(143,188,127,calc(var(--al,.2)*.55)));
+  border-color: rgba(143,188,127,.45);
+  cursor: default;
+}
+.cal-cell.hoje { outline: 2px solid var(--amarena); outline-offset: -2px; }
+.cal-dia { font-size: 11.5px; color: var(--tx-3); }
+.cal-cell.com-valor .cal-dia { color: var(--tx-2); font-weight: 600; }
+.cal-valor { font-size: 12.5px; font-weight: 650; font-variant-numeric: tabular-nums; color: var(--tx-1); }
+@media (max-width: 820px) {
+  .cal-cell { min-height: 52px; padding: 5px 5px; border-radius: 9px; }
+  .cal-valor { font-size: 10.5px; }
+  .cal-grid { gap: 4px; }
+}

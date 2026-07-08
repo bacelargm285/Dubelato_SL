@@ -293,6 +293,14 @@ DB.getnet = (function () {
     const trintaDias = new Date(hoje); trintaDias.setDate(hoje.getDate() + 30);
     A.receber7 = U.sum(fut.filter(a => a.venc <= seteDias), a => a.valor);
     A.receber30 = U.sum(fut.filter(a => a.venc <= trintaDias), a => a.valor);
+    // por dia (para o calendário): ymd -> { data, total, bandeiras: {Visa: x, ...} }
+    A.recebPorDia = {};
+    for (const a of fut) {
+      const k = a.venc.getFullYear() + '-' + String(a.venc.getMonth() + 1).padStart(2, '0') + '-' + String(a.venc.getDate()).padStart(2, '0');
+      const d = A.recebPorDia[k] || (A.recebPorDia[k] = { data: a.venc, total: 0, bandeiras: {} });
+      d.total += a.valor;
+      d.bandeiras[a.bandeira] = (d.bandeiras[a.bandeira] || 0) + a.valor;
+    }
     A.recebPorSemana = {};
     for (const a of fut) {
       const monday = new Date(a.venc); monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
