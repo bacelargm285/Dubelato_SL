@@ -399,6 +399,35 @@ DB.excel = (function () {
     return itens.length ? itens : null;
   }
 
+  /* ---------- 8. METAS ---------- */
+
+  function parseMetas(ws) {
+    const rows = grid(ws);
+    let h = -1, cInd = null, cVal = null;
+    for (let i = 0; i < Math.min(rows.length, 3); i++) {
+      (rows[i] || []).forEach((cell, j) => {
+        const n = U.norm(cell);
+        if (n === 'indicador') cInd = j;
+        else if (n === 'meta' || n === 'valor') cVal = j;
+      });
+      if (cInd != null && cVal != null) { h = i; break; }
+    }
+    if (h < 0) return null;
+    const metas = {};
+    for (let i = h + 1; i < rows.length; i++) {
+      const r = rows[i]; if (!r) continue;
+      const nome = U.norm(r[cInd]);
+      const v = U.toNum(r[cVal]);
+      if (!nome || v == null) continue;
+      if (nome.startsWith('faturamento')) metas.faturamento = v;
+      else if (nome.startsWith('cmv')) metas.cmvPct = v;
+      else if (nome.startsWith('folha')) metas.folhaPct = v;
+      else if (nome.startsWith('marketing')) metas.marketingPct = v;
+      else if (nome.startsWith('resultado')) metas.resultado = v;
+    }
+    return Object.keys(metas).length ? metas : null;
+  }
+
   /* ---------- ORQUESTRAÇÃO ---------- */
 
   /**
@@ -406,7 +435,7 @@ DB.excel = (function () {
    * não pelo nome. Retorna o modelo de dados bruto.
    */
   function parseWorkbook(wb) {
-    const model = { txs: [], estoque: [], boletos: [], cartao: [], cubas: null, producao: [], nutricional: null, abas: [], avisos: [] };
+    const model = { txs: [], estoque: [], boletos: [], cartao: [], cubas: null, producao: [], nutricional: null, metas: null, abas: [], avisos: [] };
     const nomes = wb.SheetNames;
 
     // 1ª passada: lançamentos (para descobrir o ano de referência dos boletos)
@@ -425,6 +454,10 @@ DB.excel = (function () {
       if (n.includes('cart')) {
         const ct = parseCartao(ws);
         if (ct) { model.cartao.push(...ct); model.abas.push({ name, tipo: `cartão (${ct.length} lançamentos)` }); continue; }
+      }
+      if (n.includes('meta')) {
+        const mt = parseMetas(ws);
+        if (mt) { model.metas = mt; model.abas.push({ name, tipo: 'metas (' + Object.keys(mt).length + ' indicadores)' }); continue; }
       }
       if (n.includes('nutri')) {
         const nut = parseNutricional(ws);

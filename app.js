@@ -176,7 +176,7 @@
     main.innerHTML = '<div class="skeleton-wrap">' + '<div class="skeleton"></div>'.repeat(4) + '</div>';
     requestAnimationFrame(() => {
       const fn = {
-        dashboard: viewDashboard, fluxo: viewFluxo, entradas: () => viewLancamentos('Entrada'),
+        dashboard: viewDashboard, dre: viewDRE, fluxo: viewFluxo, entradas: () => viewLancamentos('Entrada'),
         saidas: viewSaidas, boletos: viewBoletos, estoque: viewEstoque,
         ifood: viewIfood, funcionarios: viewFuncionarios, marketing: viewMarketing, cubas: viewCubas, getnet: viewGetnet, producao: viewProducao, nutricional: viewNutricional,
         comparativos: viewComparativos, clima: viewClima, consultoria: viewConsultoria, alertas: viewAlertas, config: viewConfig,
@@ -256,8 +256,74 @@
     const alertasTop = ALERTAS.filter(a => a.level !== 'ok').slice(0, 3).map(alertaHtml).join('') ||
       '<div class="alerta ok"><i class="bi bi-check-circle"></i><div><strong>Tudo em ordem</strong><p>Nenhum alerta com os dados atuais.</p></div></div>';
 
+    /* --- Visão diária: ontem e a semana --- */
+    const porDiaV = {};
+    for (const t of M.txs) {
+      if (t.tipo !== 'Entrada' || (t.grupo !== 'receitaBalcao' && t.grupo !== 'receitaIfood')) continue;
+      const kk = t.date.toDateString();
+      porDiaV[kk] = porDiaV[kk] || { data: new Date(t.date.getFullYear(), t.date.getMonth(), t.date.getDate()), v: 0 };
+      porDiaV[kk].v += t.valor;
+    }
+    const diasV = Object.values(porDiaV).sort((a, b) => a.data - b.data);
+    let visaoDiaria = '';
+    if (diasV.length >= 8) {
+      const ult = diasV[diasV.length - 1];
+      const mesmoDiaSemPassada = diasV.find(d => +d.data === +ult.data - 7 * 86400000);
+      const mediaDowU = U.avg(diasV.filter(d => d.data.getDay() === ult.data.getDay()).map(d => d.v));
+      const corte7 = +ult.data - 6 * 86400000, corte14 = +ult.data - 13 * 86400000;
+      const sem7 = U.sum(diasV.filter(d => +d.data >= corte7), d => d.v);
+      const sem7ant = U.sum(diasV.filter(d => +d.data >= corte14 && +d.data < corte7), d => d.v);
+      const NOMES_D = ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado'];
+      visaoDiaria = card('Visão diária — último dia lançado', `
+        <div class="kpi-grid kpi-grid-4">
+          ${kpiCard({ icon: 'bi-calendar-check', label: 'Venda de ' + NOMES_D[ult.data.getDay()] + ' ' + U.fmtDate(ult.data), valor: U.brl(ult.v), deltaPct: mesmoDiaSemPassada ? U.delta(ult.v, mesmoDiaSemPassada.v) : null, sub: mesmoDiaSemPassada ? 'vs mesma ' + NOMES_D[ult.data.getDay()] + ' passada (' + U.brl(mesmoDiaSemPassada.v) + ')' : '' })}
+          ${kpiCard({ icon: 'bi-bullseye', label: 'vs média de ' + NOMES_D[ult.data.getDay()], valor: mediaDowU ? U.pct(ult.v / mediaDowU * 100) : '—', sub: 'média histórica: ' + U.brl(mediaDowU), cls: mediaDowU && ult.v < mediaDowU * 0.8 ? 'kpi-warn' : '' })}
+          ${kpiCard({ icon: 'bi-calendar-week', label: 'Últimos 7 dias', valor: U.brl(sem7), deltaPct: sem7ant ? U.delta(sem7, sem7ant) : null, sub: 'vs 7 dias anteriores (' + U.brl(sem7ant) + ')' })}
+          ${kpiCard({ icon: 'bi-speedometer2', label: 'Venda média nos 7 dias', valor: U.brl(sem7 / 7), sub: 'por dia corrido' })}
+        </div>`);
+    }
+
+    /* --- Metas do mês --- */
+    let metasCard = '';
+    const MT = RAW.metas;
+    if (MT && cur) {
+      const hoje = new Date();
+      const ehMesCorrente = cur.mes === U.ymKey(hoje);
+      const [my, mm2] = cur.mes.split('-').map(Number);
+      const diasNoMes = new Date(my, mm2, 0).getDate();
+      const diasPassados = ehMesCorrente ? hoje.getDate() : diasNoMes;
+      const diasRestantes = Math.max(0, diasNoMes - diasPassados);
+      const barras = [];
+      if (MT.faturamento) {
+        const pct = cur.receita / MT.faturamento * 100;
+        const ritmoOk = pct >= (diasPassados / diasNoMes) * 100 - 5;
+        const precisaDia = diasRestantes ? Math.max(0, MT.faturamento - cur.receita) / diasRestantes : 0;
+        barras.push(`<div class="meta-item">
+          <div class="meta-head"><span>Faturamento</span><span class="mono">${U.brl(cur.receita)} / ${U.brl(MT.faturamento)} <span class="badge ${pct >= 100 ? 'ok' : ritmoOk ? 'good' : 'warn'}">${U.pct(pct, 0)}</span></span></div>
+          <div class="meta-bar"><div class="meta-fill ${pct >= 100 ? 'ok' : ritmoOk ? '' : 'warn'}" style="width:${Math.min(100, pct)}%"></div><div class="meta-mark" style="left:${Math.min(100, diasPassados / diasNoMes * 100)}%"></div></div>
+          ${ehMesCorrente && diasRestantes ? `<span class="dim">faltam ${U.brl(MT.faturamento - cur.receita > 0 ? MT.faturamento - cur.receita : 0)} · ritmo necessário: <strong>${U.brl(precisaDia)}/dia</strong> nos ${diasRestantes} dias restantes</span>` : ''}
+        </div>`);
+      }
+      const metaPct = (nome, valorAtual, meta, menorMelhor = true) => {
+        if (meta == null || valorAtual == null) return '';
+        const ok = menorMelhor ? valorAtual <= meta : valorAtual >= meta;
+        const quase = menorMelhor ? valorAtual <= meta * 1.1 : valorAtual >= meta * 0.9;
+        return `<div class="meta-mini"><span>${nome}</span><span class="badge ${ok ? 'ok' : quase ? 'warn' : 'bad'}">${U.pct(valorAtual)} <span class="dim">meta ${menorMelhor ? '≤' : '≥'} ${U.pct(meta)}</span></span></div>`;
+      };
+      const minis = [
+        metaPct('CMV', cur.cmvPct, MT.cmvPct),
+        metaPct('Folha', cur.folhaPct, MT.folhaPct),
+        metaPct('Marketing', cur.receita ? cur.marketing / cur.receita * 100 : null, MT.marketingPct),
+        MT.resultado != null ? `<div class="meta-mini"><span>Resultado</span><span class="badge ${cur.resultadoOp >= MT.resultado ? 'ok' : cur.resultadoOp >= 0 ? 'warn' : 'bad'}">${U.brl(cur.resultadoOp)} <span class="dim">meta ${U.brl(MT.resultado)}</span></span></div>` : '',
+      ].join('');
+      metasCard = card('Metas de ' + U.ymLabelFull(cur.mes) + ' <span class="dim">(aba Metas da planilha)</span>', barras.join('') + `<div class="meta-minis">${minis}</div>
+        <p class="note dim">A marquinha na barra indica onde o mês "deveria" estar pelo dia de hoje. Edite as metas na aba <code>Metas</code> da planilha.</p>`);
+    }
+
     main.innerHTML = `
       <div class="kpi-grid">${kpis}</div>
+      ${metasCard}
+      ${visaoDiaria}
       <div class="grid-2">
         ${card('Entradas × Saídas por mês', '<div class="chart-box"><canvas id="ch-es"></canvas></div>')}
         ${card('Despesas por categoria' + (m ? ' — ' + U.ymLabel(m.mes) : ''), '<div class="chart-box"><canvas id="ch-cat"></canvas></div>')}
@@ -1403,6 +1469,88 @@
       console.error(err);
       setSt('Não foi possível carregar o clima (' + err.message + '). Verifique a internet e tente de novo.');
     }
+  }
+
+  /* ---------- DRE ---------- */
+
+  function viewDRE(main) {
+    const k = mesSelecionado() || M.mesAtualKey;
+    const m = M.byMonth[k];
+    const prev = mesAnteriorDe(k);
+    if (!m) { main.innerHTML = card('DRE', '<p class="note">Sem dados no período.</p>'); return; }
+
+    const g = mes => {
+      const t = {};
+      mes.txs.filter(x => x.tipo === 'Saída' && x.grupo).forEach(x => t[x.grupo] = (t[x.grupo] || 0) + x.valor);
+      // total de saídas sem transferências internas; financiamento SEMPRE fora do operacional na DRE
+      const totalSemTransf = U.sum(mes.txs.filter(x => x.tipo === 'Saída' && x.grupo !== 'transferencia'), x => x.valor);
+      const outras = Math.max(0, totalSemTransf - (t.cmv || 0) - (t.folha || 0) - (t.fixos || 0) - (t.marketing || 0) - (t.impostos || 0) - (t.custoIfood || 0) - (t.financiamento || 0));
+      return { ...t, outras };
+    };
+    const atual = g(m), ant = prev ? g(prev) : null;
+
+    const receitaBruta = m.receita;
+    const impostos = atual.impostos || 0;
+    const receitaLiquida = receitaBruta - impostos;
+    const cmv = atual.cmv || 0;
+    const lucroBruto = receitaLiquida - cmv;
+    const despOp = (atual.folha || 0) + (atual.fixos || 0) + (atual.marketing || 0) + (atual.custoIfood || 0) + atual.outras;
+    const resultadoOp = lucroBruto - despOp;
+    const financ = atual.financiamento || 0;
+    const resultadoFinal = resultadoOp - financ;
+
+    const pctR = v => receitaBruta ? U.pct(v / receitaBruta * 100) : '—';
+    const linha = (nome, v, opts = {}) => {
+      const prevV = opts.prevFn && ant && prev ? opts.prevFn(ant, prev) : null;
+      const d = prevV != null && prevV !== 0 ? U.delta(v, prevV) : null;
+      return `<tr class="${opts.cls || ''}">
+        <td>${opts.sub ? '&nbsp;&nbsp;(−) ' : ''}${nome}</td>
+        <td class="mono right ${opts.destaque ? (v >= 0 ? 'pos' : 'neg') : ''}"><strong>${U.brl(v)}</strong></td>
+        <td class="mono right dim">${pctR(Math.abs(v))}</td>
+        <td class="mono right dim">${d != null ? (d >= 0 ? '+' : '') + U.pct(d) : '—'}</td>
+      </tr>`;
+    };
+
+    const rows = [
+      linha('Receita Bruta (balcão + iFood)', receitaBruta, { prevFn: (a, p) => p.receita }),
+      linha('Impostos', -impostos, { sub: 1, prevFn: a => -(a.impostos || 0) }),
+      linha('= Receita Líquida', receitaLiquida, { cls: 'dre-sub' }),
+      linha('CMV (matéria-prima, embalagens)', -cmv, { sub: 1, prevFn: a => -(a.cmv || 0) }),
+      linha('= Lucro Bruto', lucroBruto, { cls: 'dre-sub', destaque: 1 }),
+      linha('Folha (salários + freelancers)', -(atual.folha || 0), { sub: 1, prevFn: a => -(a.folha || 0) }),
+      linha('Fixos e administrativo', -(atual.fixos || 0), { sub: 1, prevFn: a => -(a.fixos || 0) }),
+      linha('Marketing', -(atual.marketing || 0), { sub: 1, prevFn: a => -(a.marketing || 0) }),
+      linha('Canal iFood (motoboy/taxas)', -(atual.custoIfood || 0), { sub: 1, prevFn: a => -(a.custoIfood || 0) }),
+      linha('Outras despesas operacionais', -atual.outras, { sub: 1, prevFn: a => -a.outras }),
+      linha('= Resultado Operacional', resultadoOp, { cls: 'dre-total', destaque: 1 }),
+      financ ? linha('Financiamentos (Tortelli/Celso)', -financ, { sub: 1 }) : '',
+      financ ? linha('= Resultado do mês (caixa)', resultadoFinal, { cls: 'dre-total', destaque: 1 }) : '',
+    ].join('');
+
+    const margemBruta = receitaLiquida ? lucroBruto / receitaLiquida * 100 : null;
+    const margemOp = receitaBruta ? resultadoOp / receitaBruta * 100 : null;
+
+    main.innerHTML = `
+      <div class="kpi-grid kpi-grid-4">
+        ${kpiCard({ icon: 'bi-cash-coin', label: 'Receita Bruta', valor: U.brl(receitaBruta), sub: U.ymLabelFull(k) })}
+        ${kpiCard({ icon: 'bi-graph-up', label: 'Lucro Bruto', valor: U.brl(lucroBruto), sub: margemBruta != null ? 'margem bruta ' + U.pct(margemBruta) : '' })}
+        ${kpiCard({ icon: 'bi-clipboard-data', label: 'Resultado Operacional', valor: U.brl(resultadoOp), sub: margemOp != null ? 'margem ' + U.pct(margemOp) : '', cls: resultadoOp < 0 ? 'kpi-bad' : '' })}
+        ${kpiCard({ icon: 'bi-safe', label: 'Resultado do mês (caixa)', valor: U.brl(resultadoFinal), sub: financ ? 'após ' + U.brl(financ) + ' de financiamento' : 'sem financiamentos no mês', cls: resultadoFinal < 0 ? 'kpi-warn' : '' })}
+      </div>
+      ${card('DRE — ' + U.ymLabelFull(k), `
+        <div class="table-wrap"><table>
+          <thead><tr><th>Linha</th><th class="right">Valor</th><th class="right">% Receita</th><th class="right">vs mês ant.</th></tr></thead>
+          <tbody>${rows}</tbody></table></div>
+        <p class="note">Regime de caixa (lançamentos da planilha). Na DRE, financiamentos (Tortelli/Celso) ficam sempre separados do operacional — o Resultado Operacional mostra a saúde do negócio, e o Resultado do mês mostra o caixa após as parcelas. Use o filtro de mês no topo para qualquer período.</p>`)}
+      ${card('Evolução do resultado', '<div class="chart-box tall"><canvas id="ch-dre"></canvas></div>')}`;
+
+    const p = DB.charts.palette();
+    DB.charts.barras('ch-dre', M.meses.map(U.ymLabel), [
+      { label: 'Lucro Bruto', data: M.meses.map(mk => { const mm = M.byMonth[mk], gg = g(mm); return (mm.receita - (gg.impostos || 0)) - (gg.cmv || 0); }), color: p.pistache },
+      { label: 'Resultado Operacional', data: M.meses.map(mk => { const mm = M.byMonth[mk], gg = g(mm);
+        const lb = (mm.receita - (gg.impostos || 0)) - (gg.cmv || 0);
+        return lb - ((gg.folha || 0) + (gg.fixos || 0) + (gg.marketing || 0) + (gg.custoIfood || 0) + gg.outras); }), color: p.gold },
+    ]);
   }
 
   function viewConsultoria(main) {

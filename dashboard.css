@@ -260,3 +260,16 @@ tr:hover td { background: var(--surface-2); }
 .linha-sabor { cursor: pointer; }
 .linha-sabor.sel td { background: linear-gradient(120deg, rgba(31,138,128,.12), rgba(192,145,63,.09)); }
 .tabela-sabores .chip { margin: 1px 2px 1px 0; white-space: nowrap; }
+
+/* -------- metas -------- */
+.meta-item { margin-bottom: 14px; }
+.meta-head { display: flex; justify-content: space-between; gap: 10px; font-size: 13.5px; margin-bottom: 6px; flex-wrap: wrap; }
+.meta-bar { position: relative; height: 12px; border-radius: 999px; background: var(--surface-2); overflow: visible; }
+.meta-fill { height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--teal), var(--mint)); transition: width .5s ease; }
+.meta-fill.warn { background: linear-gradient(90deg, var(--gold), #d9b36a); }
+.meta-fill.ok { background: linear-gradient(90deg, var(--teal), var(--pistache)); }
+.meta-mark { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--tx-2); opacity: .6; border-radius: 2px; }
+.meta-minis { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-top: 10px; }
+.meta-mini { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.dre-sub td { border-top: 1px solid var(--line); font-weight: 600; }
+.dre-total td { border-top: 2px solid var(--teal); background: var(--surface-2); font-weight: 650; }
