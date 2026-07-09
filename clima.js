@@ -173,26 +173,48 @@ DB.clima = (function () {
     }
     const fatorChuva = (mediaChuva && mediaSeco) ? Math.min(1, mediaChuva / mediaSeco) : 1;
 
-    // fatores de CALENDÁRIO por resíduo (venda ÷ esperado dow×clima), com
-    // amortecimento: poucas amostras puxam o fator para o neutro (1.0) —
-    // fator = (n·média + K·1) / (n + K). Evita otimismo por amostra pequena.
+    // ---- DECOMPOSIÇÃO COM NÍVEL LOCAL ----
+    // unit0 = venda "limpa" de dia-da-semana e temperatura. O nível do negócio
+    // muda ao longo do tempo (ano passado ≠ hoje), então cada contexto é medido
+    // contra a MEDIANA dos dias comuns vizinhos (±45 dias) — o julho passado
+    // ensina o FORMATO do efeito férias, não a escala de outro ano.
+    const mediana = arr => { const s = arr.slice().sort((a, b) => a - b); return s.length ? s[Math.floor(s.length / 2)] : null; };
+    pontos.sort((a, b) => a.data - b.data);
+    for (const p of pontos) p.unit0 = p.venda / (fatorDow[p.dow] * (fatorFaixa[faixaDe(p.tmax).id] || 1));
+    const unitsNormais = pontos.filter(p => p.ctx.contexto === 'normal');
+    const nivelGlobal = mediana(unitsNormais.map(p => p.unit0)) || mediaBase;
+    const JANELA = 45 * 86400000;
+    function nivelLocal(data) {
+      const viz = unitsNormais.filter(p => Math.abs(p.data - data) <= JANELA);
+      return viz.length >= 10 ? mediana(viz.map(p => p.unit0)) : nivelGlobal;
+    }
+
+    // fatores de CALENDÁRIO: resíduo = unit0 ÷ nível local, com amortecimento
     const K_SHRINK = 5;
     const residuos = {};
     for (const p of pontos) {
-      const esperado = mediaBase * fatorDow[p.dow] * (fatorFaixa[faixaDe(p.tmax).id] || 1);
-      if (esperado <= 0) continue;
-      (residuos[p.ctx.contexto] = residuos[p.ctx.contexto] || []).push(p.venda / esperado);
+      const nl = nivelLocal(p.data);
+      if (nl > 0) (residuos[p.ctx.contexto] = residuos[p.ctx.contexto] || []).push(p.unit0 / nl);
     }
     const fatorContexto = { normal: 1 }, contextos = [];
     for (const ctxId of DB.calendario.ORDEM) {
       const rs = residuos[ctxId] || [];
       const bruto = rs.length ? U.avg(rs) : 1;
-      const fator = ctxId === 'normal' ? 1 : (rs.length * bruto + K_SHRINK * 1) / (rs.length + K_SHRINK);
+      let fator = ctxId === 'normal' ? 1 : (rs.length * bruto + K_SHRINK * 1) / (rs.length + K_SHRINK);
+      fator = Math.min(3, Math.max(0.5, fator)); // trava de segurança
       fatorContexto[ctxId] = fator;
       contextos.push({ id: ctxId, rotulo: DB.calendario.ROTULOS[ctxId], dias: rs.length, fator, bruto, medido: rs.length >= 4 });
     }
 
-    return { pontos, fonteExtra, fatorCal, mediaGeral, mediaBase, porFaixa, mediaChuva, mediaSeco, nChuvosos: chuvosos.length, nSecos: secos.length, r, fatorDow, fatorFaixa, fatorChuva, fatorContexto, contextos, mapaCal };
+    // NÍVEL ATUAL do negócio: mediana do unit0 dos dias comuns das últimas
+    // 8 semanas (com fallback progressivo). A previsão parte daqui — se este
+    // inverno está mais fraco que o do ano passado, ela segue este inverno.
+    const ultimo = pontos[pontos.length - 1].data;
+    let recentes = unitsNormais.filter(p => (ultimo - p.data) <= 56 * 86400000);
+    if (recentes.length < 12) recentes = unitsNormais.filter(p => (ultimo - p.data) <= 90 * 86400000);
+    const nivelAtual = recentes.length >= 8 ? mediana(recentes.map(p => p.unit0)) : nivelGlobal;
+
+    return { pontos, fonteExtra, fatorCal, mediaGeral, mediaBase, nivelAtual, porFaixa, mediaChuva, mediaSeco, nChuvosos: chuvosos.length, nSecos: secos.length, r, fatorDow, fatorFaixa, fatorChuva, fatorContexto, contextos, mapaCal };
   }
 
   /** Previsão de demanda: média × dia da semana × temperatura × chuva × calendário */
@@ -200,7 +222,7 @@ DB.clima = (function () {
     return prev.map(p => {
       const fx = faixaDe(p.tmax);
       const ctx = DB.calendario.classificar(p.data, analise.mapaCal);
-      let est = analise.mediaBase
+      let est = analise.nivelAtual
         * analise.fatorDow[p.data.getDay()]
         * (analise.fatorFaixa[fx.id] || 1)
         * (analise.fatorContexto[ctx.contexto] || 1);
