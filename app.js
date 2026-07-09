@@ -1005,6 +1005,16 @@
         <p class="note">Crédito custa ${U.pct(A.porMod['Crédito'] ? A.porMod['Crédito'].taxa / A.porMod['Crédito'].bruto * 100 : null, 2)} e débito ${U.pct(A.porMod['Débito'] ? A.porMod['Débito'].taxa / A.porMod['Débito'].bruto * 100 : null, 2)}. PIX na maquininha é isento — cada 1% de vendas migrando de crédito para PIX economiza ~${U.brl(A.cartaoBruto * 0.01 * (A.taxaMediaPct / 100))} no período.</p>`)}
       ${card('Agenda de recebimentos — calendário', montarCalendarioGetnet(A))}
       ${card('Próximos recebimentos, dia a dia', montarTabelaRecebimentos(A))}
+      ${A.yoy && A.yoy.length ? card('Crescimento ano a ano (mesmo mês do ano anterior)', `
+        <div class="table-wrap"><table>
+          <thead><tr><th>Mês</th><th class="right">Este ano</th><th class="right">Ano passado</th><th class="right">Crescimento</th></tr></thead>
+          <tbody>${A.yoy.map(y => `<tr>
+            <td><strong>${U.ymLabel(y.mes)}</strong> <span class="dim">vs ${U.ymLabel(y.mesAnterior)}</span></td>
+            <td class="mono right">${U.brl(y.atual)}</td>
+            <td class="mono right">${U.brl(y.anterior)}</td>
+            <td class="mono right"><span class="badge ${y.crescimento >= 0 ? 'ok' : 'bad'}">${y.crescimento >= 0 ? '+' : ''}${U.pct(y.crescimento)}</span></td>
+          </tr>`).join('')}</tbody></table></div>
+        <p class="note">A comparação certa para negócio sazonal: junho contra junho, não junho contra maio. Só cartão + PIX (a maquininha vê as duas épocas do mesmo jeito, então o crescimento é comparável).</p>`) : ''}
       ${A.cruzamento.length ? card('Cruzamento: planilha × maquininha', `<div class="table-wrap"><table>
         <thead><tr><th>Mês</th><th>Vendas na planilha (balcão)</th><th>Getnet (cartão + PIX)</th><th>Diferença (≈ dinheiro)</th></tr></thead>
         <tbody>${rowsCruz}</tbody></table></div>
@@ -1357,7 +1367,7 @@
         ${card('Venda média por faixa de temperatura', '<div class="chart-box"><canvas id="ch-cl-faixa"></canvas></div>')}
         ${card('Cada dia: temperatura × venda', '<div class="chart-box"><canvas id="ch-cl-scatter"></canvas></div>')}
       </div>
-      ${card('Como ler', `<p class="note">Correlação de ${A.r != null ? A.r.toFixed(2) : '—'} (${corr}) entre a máxima do dia e a venda. ${impChuva != null ? 'Chuva forte derruba a venda em ~' + impChuva + ' (' + A.nChuvosos + ' dias chuvosos vs ' + A.nSecos + ' secos na base). ' : ''}O histórico climático fica em cache no navegador; o botão de recarregar aparece quando novos dias de venda entram na planilha.</p>`)}`;
+      ${card('Como ler', `<p class="note">Correlação de ${A.r != null ? A.r.toFixed(2) : '—'} (${corr}) entre a máxima do dia e a venda. ${impChuva != null ? 'Chuva forte derruba a venda em ~' + impChuva + ' (' + A.nChuvosos + ' dias chuvosos vs ' + A.nSecos + ' secos na base). ' : ''}O histórico climático fica em cache no navegador. ${A.fonteExtra ? 'A base inclui ' + A.fonteExtra + ' dias anteriores à planilha completados pela maquininha (calibrados ×' + A.fatorCal.toFixed(2) + ' para compensar o dinheiro em espécie) — inclusive o julho do ano passado, que ancora a previsão das férias de inverno.' : ''}</p>`)}`;
 
     const p = DB.charts.palette();
     DB.charts.barras('ch-cl-faixa', A.porFaixa.map(f => f.label), [{ label: 'Venda média/dia', data: A.porFaixa.map(f => f.media || 0), color: p.gold }]);
@@ -1379,11 +1389,12 @@
     try {
       setSt('Buscando histórico de clima de São Lourenço…');
       const datas = M.txs.filter(t => t.tipo === 'Entrada' && (t.grupo === 'receitaBalcao' || t.grupo === 'receitaIfood')).map(t => t.date);
+      if (GETNET) { GETNET.cartoes.forEach(c => datas.push(c.data)); (GETNET.pix || []).forEach(p => datas.push(p.data)); }
       const min = new Date(Math.min(...datas)), max = new Date(Math.max(...datas));
       const hoje = new Date(); const limite = new Date(hoje); limite.setDate(limite.getDate() - 2);
       const diasClima = await DB.clima.historico(min, max > limite ? limite : max);
       setSt('Analisando e buscando previsão…');
-      const analise = DB.clima.analisar(M, diasClima);
+      const analise = DB.clima.analisar(M, diasClima, GETNET);
       if (!analise) { setSt('Poucos dias com venda + clima para analisar.'); return; }
       const prev = await DB.clima.previsao7d();
       CLIMA = { analise, previsaoDemanda: DB.clima.preverDemanda(analise, prev) };

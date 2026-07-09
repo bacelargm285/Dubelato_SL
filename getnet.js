@@ -309,6 +309,18 @@ DB.getnet = (function () {
       A.recebPorSemana[k].total += a.valor;
     }
 
+    // comparativo ano a ano (mês vs mesmo mês do ano anterior)
+    A.yoy = [];
+    const mesesG = Object.keys(A.porMes).sort();
+    for (const k of mesesG) {
+      const [y, mo] = k.split('-');
+      const anoAnt = (parseInt(y) - 1) + '-' + mo;
+      if (!A.porMes[anoAnt]) continue;
+      const atual = A.porMes[k].bruto + A.porMes[k].pix;
+      const anterior = A.porMes[anoAnt].bruto + A.porMes[anoAnt].pix;
+      A.yoy.push({ mes: k, mesAnterior: anoAnt, atual, anterior, crescimento: anterior ? (atual / anterior - 1) * 100 : null });
+    }
+
     // cruzamento com a planilha: Vendas (balcão) da planilha vs Getnet (cartão+pix)
     A.cruzamento = [];
     const datasG = d.cartoes.map(c => +c.data).concat(d.pix.map(p => +p.data));

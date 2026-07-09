@@ -66,7 +66,13 @@ DB.clima = (function () {
 
   /* ---------- vendas diárias da planilha ---------- */
 
-  function vendasPorDia(M) {
+  /**
+   * Vendas diárias: planilha como fonte principal; dias ANTERIORES ao início
+   * da planilha são completados pela Getnet (cartão+PIX), calibrados pela
+   * razão planilha÷Getnet medida nos meses em que as duas fontes coexistem
+   * (compensa o dinheiro em espécie que a maquininha não vê).
+   */
+  function vendasPorDia(M, getnet) {
     const porDia = {};
     for (const t of M.txs) {
       if (t.tipo !== 'Entrada') continue;
@@ -74,7 +80,31 @@ DB.clima = (function () {
       const k = ymd(t.date);
       porDia[k] = (porDia[k] || 0) + t.valor;
     }
-    return porDia;
+    if (!getnet || !getnet.cartoes || !getnet.cartoes.length) return { porDia, fonteExtra: 0, fatorCal: null };
+
+    // séries getnet por dia e por mês
+    const gDia = {}, gMes = {}, pMes = {};
+    const add = (mapa, k, v) => mapa[k] = (mapa[k] || 0) + v;
+    for (const c of getnet.cartoes) { add(gDia, ymd(c.data), c.bruto); add(gMes, U.ymKey(c.data), c.bruto); }
+    for (const p of getnet.pix || []) { add(gDia, ymd(p.data), p.bruto); add(gMes, U.ymKey(p.data), p.bruto); }
+    for (const [k, v] of Object.entries(porDia)) add(pMes, k.slice(0, 7), v);
+
+    // fator de calibração: mediana de planilha÷getnet nos meses completos em comum
+    const razoes = [];
+    for (const m of Object.keys(pMes)) {
+      if (gMes[m] && gMes[m] > 5000 && pMes[m] > 5000) razoes.push(pMes[m] / gMes[m]);
+    }
+    razoes.sort((a, b) => a - b);
+    let fatorCal = razoes.length >= 3 ? razoes[Math.floor(razoes.length / 2)] : 1.1;
+    fatorCal = Math.min(1.5, Math.max(1, fatorCal));
+
+    // completa apenas dias anteriores ao início da planilha
+    const minPlanilha = Object.keys(porDia).sort()[0];
+    let fonteExtra = 0;
+    for (const [k, v] of Object.entries(gDia)) {
+      if (k < minPlanilha && !porDia[k] && v > 0) { porDia[k] = v * fatorCal; fonteExtra++; }
+    }
+    return { porDia, fonteExtra, fatorCal };
   }
 
   /* ---------- análise ---------- */
@@ -94,8 +124,8 @@ DB.clima = (function () {
    * além do esperado para aquele dia da semana + temperatura — assim
    * feriadão que cai em domingo quente não conta o efeito em dobro.
    */
-  function analisar(M, diasClima) {
-    const vendas = vendasPorDia(M);
+  function analisar(M, diasClima, getnet) {
+    const { porDia: vendas, fonteExtra, fatorCal } = vendasPorDia(M, getnet);
     const anos = Object.keys(vendas).map(k => +k.slice(0, 4));
     const mapaCal = DB.calendario.construirMapa(Math.min(...anos), Math.max(...anos) + 1);
 
@@ -162,7 +192,7 @@ DB.clima = (function () {
       contextos.push({ id: ctxId, rotulo: DB.calendario.ROTULOS[ctxId], dias: rs.length, fator, bruto, medido: rs.length >= 4 });
     }
 
-    return { pontos, mediaGeral, mediaBase, porFaixa, mediaChuva, mediaSeco, nChuvosos: chuvosos.length, nSecos: secos.length, r, fatorDow, fatorFaixa, fatorChuva, fatorContexto, contextos, mapaCal };
+    return { pontos, fonteExtra, fatorCal, mediaGeral, mediaBase, porFaixa, mediaChuva, mediaSeco, nChuvosos: chuvosos.length, nSecos: secos.length, r, fatorDow, fatorFaixa, fatorChuva, fatorContexto, contextos, mapaCal };
   }
 
   /** Previsão de demanda: média × dia da semana × temperatura × chuva × calendário */
