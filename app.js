@@ -70,6 +70,9 @@
     r.readAsArrayBuffer(file);
   }
 
+  // hook para testes automatizados (sem efeito no uso normal)
+  window.__dbTest = { carregar: (b, n) => carregar(b, n), irPara: v => { viewAtual = v; render(); }, getModelo: () => M };
+
   function carregar(buf, nome) {
     try {
       RAW = DB.excel.fromArrayBuffer(buf);
@@ -286,6 +289,7 @@
     /* --- Metas do mês --- */
     let metasCard = '';
     const MT = RAW.metas;
+    const cur = M.cur; // mês corrente (metas sempre acompanham o mês em andamento)
     if (MT && cur) {
       const hoje = new Date();
       const ehMesCorrente = cur.mes === U.ymKey(hoje);
