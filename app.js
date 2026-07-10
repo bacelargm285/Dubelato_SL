@@ -71,7 +71,7 @@
   }
 
   // hook para testes automatizados (sem efeito no uso normal)
-  window.__dbTest = { carregar: (b, n) => carregar(b, n), irPara: v => { viewAtual = v; render(); }, getModelo: () => M };
+  window.__dbTest = { carregar: (b, n) => carregar(b, n), irPara: v => { viewAtual = v; render(); }, getModelo: () => M, relatorio: () => gerarRelatorio() };
 
   function carregar(buf, nome) {
     try {
@@ -126,6 +126,7 @@
     $('#btn-menu').addEventListener('click', () => $('#sidebar').classList.toggle('open'));
     $('#backdrop').addEventListener('click', () => $('#sidebar').classList.remove('open'));
     $('#btn-print').addEventListener('click', () => window.print());
+    $('#btn-report').addEventListener('click', gerarRelatorio);
   }
 
   function initTheme() {
@@ -1477,31 +1478,42 @@
 
   /* ---------- DRE ---------- */
 
+  /** Grupos de saída de um mês (financiamento sempre separado do operacional) */
+  function gruposDRE(mes) {
+    const t = {};
+    mes.txs.filter(x => x.tipo === 'Saída' && x.grupo).forEach(x => t[x.grupo] = (t[x.grupo] || 0) + x.valor);
+    const totalSemTransf = U.sum(mes.txs.filter(x => x.tipo === 'Saída' && x.grupo !== 'transferencia'), x => x.valor);
+    const outras = Math.max(0, totalSemTransf - (t.cmv || 0) - (t.folha || 0) - (t.fixos || 0) - (t.marketing || 0) - (t.impostos || 0) - (t.custoIfood || 0) - (t.financiamento || 0));
+    return { ...t, outras };
+  }
+
+  /** DRE completa de um mês (reutilizada pela view e pelo relatório PDF) */
+  function dreDoMes(k) {
+    const m = M.byMonth[k];
+    if (!m) return null;
+    const at = gruposDRE(m);
+    const receitaBruta = m.receita;
+    const impostos = at.impostos || 0;
+    const receitaLiquida = receitaBruta - impostos;
+    const cmv = at.cmv || 0;
+    const lucroBruto = receitaLiquida - cmv;
+    const despOp = (at.folha || 0) + (at.fixos || 0) + (at.marketing || 0) + (at.custoIfood || 0) + at.outras;
+    const resultadoOp = lucroBruto - despOp;
+    const financ = at.financiamento || 0;
+    const resultadoFinal = resultadoOp - financ;
+    return { m, at, receitaBruta, impostos, receitaLiquida, cmv, lucroBruto, despOp, resultadoOp, financ, resultadoFinal,
+      margemBruta: receitaLiquida ? lucroBruto / receitaLiquida * 100 : null,
+      margemOp: receitaBruta ? resultadoOp / receitaBruta * 100 : null };
+  }
+
   function viewDRE(main) {
     const k = mesSelecionado() || M.mesAtualKey;
-    const m = M.byMonth[k];
+    const D = dreDoMes(k);
     const prev = mesAnteriorDe(k);
-    if (!m) { main.innerHTML = card('DRE', '<p class="note">Sem dados no período.</p>'); return; }
-
-    const g = mes => {
-      const t = {};
-      mes.txs.filter(x => x.tipo === 'Saída' && x.grupo).forEach(x => t[x.grupo] = (t[x.grupo] || 0) + x.valor);
-      // total de saídas sem transferências internas; financiamento SEMPRE fora do operacional na DRE
-      const totalSemTransf = U.sum(mes.txs.filter(x => x.tipo === 'Saída' && x.grupo !== 'transferencia'), x => x.valor);
-      const outras = Math.max(0, totalSemTransf - (t.cmv || 0) - (t.folha || 0) - (t.fixos || 0) - (t.marketing || 0) - (t.impostos || 0) - (t.custoIfood || 0) - (t.financiamento || 0));
-      return { ...t, outras };
-    };
-    const atual = g(m), ant = prev ? g(prev) : null;
-
-    const receitaBruta = m.receita;
-    const impostos = atual.impostos || 0;
-    const receitaLiquida = receitaBruta - impostos;
-    const cmv = atual.cmv || 0;
-    const lucroBruto = receitaLiquida - cmv;
-    const despOp = (atual.folha || 0) + (atual.fixos || 0) + (atual.marketing || 0) + (atual.custoIfood || 0) + atual.outras;
-    const resultadoOp = lucroBruto - despOp;
-    const financ = atual.financiamento || 0;
-    const resultadoFinal = resultadoOp - financ;
+    if (!D) { main.innerHTML = card('DRE', '<p class="note">Sem dados no período.</p>'); return; }
+    const { m, at: atual, receitaBruta, impostos, receitaLiquida, cmv, lucroBruto, resultadoOp, financ, resultadoFinal } = D;
+    const g = gruposDRE;
+    const ant = prev ? g(prev) : null;
 
     const pctR = v => receitaBruta ? U.pct(v / receitaBruta * 100) : '—';
     const linha = (nome, v, opts = {}) => {
@@ -1531,8 +1543,7 @@
       financ ? linha('= Resultado do mês (caixa)', resultadoFinal, { cls: 'dre-total', destaque: 1 }) : '',
     ].join('');
 
-    const margemBruta = receitaLiquida ? lucroBruto / receitaLiquida * 100 : null;
-    const margemOp = receitaBruta ? resultadoOp / receitaBruta * 100 : null;
+    const margemBruta = D.margemBruta, margemOp = D.margemOp;
 
     main.innerHTML = `
       <div class="kpi-grid kpi-grid-4">
@@ -1555,6 +1566,120 @@
         const lb = (mm.receita - (gg.impostos || 0)) - (gg.cmv || 0);
         return lb - ((gg.folha || 0) + (gg.fixos || 0) + (gg.marketing || 0) + (gg.custoIfood || 0) + gg.outras); }), color: p.gold },
     ]);
+  }
+
+  /* ---------- RESUMO EXECUTIVO DO MÊS (PDF) ---------- */
+
+  function gerarRelatorio() {
+    if (!M) return;
+    const k = mesSelecionado() || M.mesAtualKey;
+    const D = dreDoMes(k);
+    if (!D) { alert('Sem dados para o mês selecionado.'); return; }
+    const m = D.m;
+    const prev = mesAnteriorDe(k);
+    const ehAtual = k === M.mesAtualKey;
+    const hoje = new Date();
+
+    const pct = v => v != null && isFinite(v) ? U.pct(v) : '—';
+    const pctR = v => D.receitaBruta ? U.pct(Math.abs(v) / D.receitaBruta * 100) : '—';
+
+    // KPIs do mês
+    const kpi = (label, valor, sub) => `<div class="rp-kpi"><span class="rp-kpi-l">${label}</span><span class="rp-kpi-v">${valor}</span>${sub ? `<span class="rp-kpi-s">${sub}</span>` : ''}</div>`;
+    const kpis = [
+      kpi('Receita Bruta', U.brl(D.receitaBruta), prev ? (U.delta(D.receitaBruta, prev.receita) >= 0 ? '▲ ' : '▼ ') + pct(Math.abs(U.delta(D.receitaBruta, prev.receita))) + ' vs ' + U.ymLabel(prev.mes) : ''),
+      kpi('Resultado Operacional', U.brl(D.resultadoOp), 'margem ' + pct(D.margemOp)),
+      kpi('Resultado do mês (caixa)', U.brl(D.resultadoFinal), D.financ ? 'após ' + U.brl(D.financ) + ' de financiamento' : ''),
+      kpi('CMV', pct(m.cmvPct), U.brl(D.cmv)),
+      kpi('Venda média/dia', U.brl(m.vendaMediaDia), m.diasVenda.size + ' dias de venda'),
+      kpi('Saldo acumulado', U.brl(M.kpi.saldoAtual), 'capital de giro: ' + (M.kpi.capitalGiroMeses != null ? M.kpi.capitalGiroMeses.toFixed(1) + ' meses' : '—')),
+    ].join('');
+
+    // Metas
+    let metasHtml = '';
+    if (RAW.metas && ehAtual) {
+      const MT = RAW.metas;
+      const itens = [];
+      if (MT.faturamento) itens.push(`Faturamento: <strong>${U.brl(m.receita)}</strong> de ${U.brl(MT.faturamento)} (${U.pct(m.receita / MT.faturamento * 100, 0)})`);
+      if (MT.cmvPct && m.cmvPct != null) itens.push(`CMV: <strong>${pct(m.cmvPct)}</strong> (meta ≤ ${U.pct(MT.cmvPct)}) ${m.cmvPct <= MT.cmvPct ? '✔' : '✘'}`);
+      if (MT.folhaPct && m.folhaPct != null) itens.push(`Folha: <strong>${pct(m.folhaPct)}</strong> (meta ≤ ${U.pct(MT.folhaPct)}) ${m.folhaPct <= MT.folhaPct ? '✔' : '✘'}`);
+      if (MT.resultado != null) itens.push(`Resultado: <strong>${U.brl(D.resultadoOp)}</strong> (meta ${U.brl(MT.resultado)}) ${D.resultadoOp >= MT.resultado ? '✔' : '✘'}`);
+      if (itens.length) metasHtml = `<div class="rp-sec"><h3>Metas do mês</h3><ul class="rp-lista">${itens.map(i => `<li>${i}</li>`).join('')}</ul></div>`;
+    }
+
+    // DRE
+    const l = (nome, v, cls = '') => `<tr class="${cls}"><td>${nome}</td><td class="rp-num">${U.brl(v)}</td><td class="rp-num rp-dim">${pctR(v)}</td></tr>`;
+    const dreHtml = `<table class="rp-tabela">
+      <thead><tr><th>DRE — ${U.ymLabelFull(k)}</th><th class="rp-num">Valor</th><th class="rp-num">% Rec.</th></tr></thead><tbody>
+      ${l('Receita Bruta (balcão + iFood)', D.receitaBruta)}
+      ${l('(−) Impostos', -D.impostos)}
+      ${l('= Receita Líquida', D.receitaLiquida, 'rp-sub')}
+      ${l('(−) CMV', -D.cmv)}
+      ${l('= Lucro Bruto  ·  margem ' + pct(D.margemBruta), D.lucroBruto, 'rp-sub')}
+      ${l('(−) Folha', -(D.at.folha || 0))}
+      ${l('(−) Fixos e administrativo', -(D.at.fixos || 0))}
+      ${l('(−) Marketing', -(D.at.marketing || 0))}
+      ${l('(−) Canal iFood', -(D.at.custoIfood || 0))}
+      ${l('(−) Outras despesas', -D.at.outras)}
+      ${l('= RESULTADO OPERACIONAL', D.resultadoOp, 'rp-total')}
+      ${D.financ ? l('(−) Financiamentos (Tortelli/Celso)', -D.financ) : ''}
+      ${D.financ ? l('= Resultado do mês (caixa)', D.resultadoFinal, 'rp-total') : ''}
+      </tbody></table>`;
+
+    // Raio-X vs referências
+    const gt = {};
+    m.txs.filter(t => t.tipo === 'Saída' && t.grupo).forEach(t => gt[t.grupo] = (gt[t.grupo] || 0) + t.valor);
+    const raioRows = BENCH.map(b => {
+      const val = U.sum(b.grupos, gg => gt[gg] || 0);
+      const p2 = D.receitaBruta ? val / D.receitaBruta * 100 : null;
+      const status = p2 == null ? '—' : p2 > b.max ? '⚠ acima' : (p2 < b.min && b.min > 0 ? 'abaixo' : '✔ dentro');
+      return `<tr><td>${b.nome}</td><td class="rp-num">${U.brl(val)}</td><td class="rp-num">${pct(p2)}</td><td class="rp-num rp-dim">${b.min}–${b.max}%</td><td>${status}</td></tr>`;
+    }).join('');
+    const raioHtml = `<table class="rp-tabela">
+      <thead><tr><th>Grupo de custo</th><th class="rp-num">Gasto</th><th class="rp-num">% Rec.</th><th class="rp-num">Referência</th><th>Status</th></tr></thead>
+      <tbody>${raioRows}</tbody></table>
+      <p class="rp-nota">Referências de gelateria artesanal / food service.</p>`;
+
+    // Análise em texto + alertas (mês corrente usa a consultoria completa)
+    let analiseHtml = '';
+    if (ehAtual) {
+      const paras = DB.analytics.resumoExecutivo(M, INV);
+      const ins = DB.analytics.insights(M, INV).slice(0, 6);
+      analiseHtml = `<div class="rp-sec"><h3>Análise</h3>${(Array.isArray(paras) ? paras : [paras]).map(p2 => `<p>${p2}</p>`).join('')}</div>
+        <div class="rp-sec"><h3>Pontos de atenção</h3><ul class="rp-lista">${ins.map(i => `<li>${i.texto}</li>`).join('')}</ul></div>`;
+    } else {
+      const dRec = prev ? U.delta(D.receitaBruta, prev.receita) : null;
+      analiseHtml = `<div class="rp-sec"><h3>Análise</h3><p>Em ${U.ymLabelFull(k)}, a Dubelato faturou ${U.brl(D.receitaBruta)} (${U.brl(m.vendasBalcao)} no balcão e ${U.brl(m.vendasIfood)} no iFood)${dRec != null ? ', ' + (dRec >= 0 ? 'alta' : 'queda') + ' de ' + pct(Math.abs(dRec)) + ' sobre o mês anterior' : ''}. O CMV consumiu ${pct(m.cmvPct)} da receita e a folha ${pct(m.folhaPct)}. O resultado operacional foi ${U.brl(D.resultadoOp)} (margem ${pct(D.margemOp)})${D.financ ? ', e após ' + U.brl(D.financ) + ' de financiamentos o mês fechou em ' + U.brl(D.resultadoFinal) + ' no caixa' : ''}.</p></div>`;
+    }
+
+    const overlay = U.el(`<div id="report-overlay">
+      <div class="rp-acoes no-print">
+        <button class="side-btn" id="rp-print"><i class="bi bi-file-earmark-pdf"></i> Salvar em PDF</button>
+        <button class="side-btn" id="rp-close"><i class="bi bi-x-lg"></i> Fechar</button>
+        <span class="dim">No celular: Compartilhar → Salvar como PDF. No PC: destino "Salvar como PDF".</span>
+      </div>
+      <div class="rp-pagina">
+        <header class="rp-head">
+          <div class="logo-scoop"></div>
+          <div><h1>Dubelato · Resumo Executivo</h1><p>${U.ymLabelFull(k)} — gerado em ${hoje.toLocaleDateString('pt-BR')} às ${hoje.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</p></div>
+        </header>
+        <div class="rp-kpis">${kpis}</div>
+        ${metasHtml}
+        ${analiseHtml}
+        <div class="rp-sec">${dreHtml}</div>
+        <div class="rp-sec"><h3>Custos vs referência do setor</h3>${raioHtml}</div>
+        <footer class="rp-foot">Dubelato BI — il gelato rende felici · documento gerado automaticamente a partir da planilha de controle</footer>
+      </div>
+    </div>`);
+    document.body.appendChild(overlay);
+    document.body.classList.add('report-open');
+    overlay.querySelector('#rp-close').addEventListener('click', fecharRelatorio);
+    overlay.querySelector('#rp-print').addEventListener('click', () => window.print());
+  }
+
+  function fecharRelatorio() {
+    const o = document.getElementById('report-overlay');
+    if (o) o.remove();
+    document.body.classList.remove('report-open');
   }
 
   function viewConsultoria(main) {

@@ -273,3 +273,53 @@ tr:hover td { background: var(--surface-2); }
 .meta-mini { display: flex; align-items: center; gap: 8px; font-size: 13px; }
 .dre-sub td { border-top: 1px solid var(--line); font-weight: 600; }
 .dre-total td { border-top: 2px solid var(--teal); background: var(--surface-2); font-weight: 650; }
+
+/* -------- resumo executivo (relatório PDF) -------- */
+#report-overlay {
+  position: fixed; inset: 0; z-index: 100;
+  overflow-y: auto;
+  background: rgba(0,0,0,.5);
+  padding: 20px 10px 60px;
+}
+.rp-acoes { display: flex; gap: 10px; align-items: center; max-width: 800px; margin: 0 auto 14px; flex-wrap: wrap; }
+.rp-acoes .side-btn { max-width: 200px; background: var(--bg-1); }
+.rp-acoes .dim { color: #eee; }
+.rp-pagina {
+  max-width: 800px; margin: 0 auto;
+  background: #fff; color: #222;
+  border-radius: 8px;
+  padding: 34px 40px;
+  font-size: 12.5px; line-height: 1.5;
+  box-shadow: 0 20px 60px rgba(0,0,0,.35);
+}
+.rp-pagina h1 { font-size: 21px; margin: 0; color: #14615b; }
+.rp-pagina h3 { font-size: 13.5px; margin: 0 0 8px; color: #14615b; border-bottom: 2px solid #1f8a80; padding-bottom: 4px; }
+.rp-head { display: flex; gap: 14px; align-items: center; border-bottom: 6px solid; border-image: repeating-linear-gradient(90deg,#14615b 0 12px,#fff 12px 26px) 1; padding-bottom: 14px; margin-bottom: 18px; }
+.rp-head p { margin: 2px 0 0; color: #777; font-size: 12px; }
+.rp-head .logo-scoop { width: 46px; height: 46px; margin: 0; box-shadow: none; border-color: #ddd; }
+.rp-kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 18px; }
+.rp-kpi { border: 1px solid #e2e8e6; border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; }
+.rp-kpi-l { font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: #7a8a86; }
+.rp-kpi-v { font-size: 16.5px; font-weight: 700; color: #1c2b29; font-variant-numeric: tabular-nums; }
+.rp-kpi-s { font-size: 10.5px; color: #7a8a86; }
+.rp-sec { margin-bottom: 18px; }
+.rp-sec p { margin: 0 0 8px; text-align: justify; }
+.rp-lista { margin: 0; padding-left: 16px; } .rp-lista li { margin-bottom: 4px; }
+.rp-tabela { width: 100%; border-collapse: collapse; font-size: 12px; }
+.rp-tabela th { text-align: left; font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: #7a8a86; border-bottom: 1.5px solid #14615b; padding: 5px 8px; }
+.rp-tabela td { padding: 5px 8px; border-bottom: 1px solid #edf1f0; }
+.rp-num { text-align: right; font-variant-numeric: tabular-nums; }
+.rp-dim { color: #98a5a2; }
+.rp-sub td { font-weight: 650; border-top: 1px solid #cfdbd8; }
+.rp-total td { font-weight: 700; background: #eef5f3; border-top: 2px solid #1f8a80; }
+.rp-nota { font-size: 10.5px; color: #98a5a2; margin: 6px 0 0; }
+.rp-foot { margin-top: 22px; padding-top: 10px; border-top: 1px solid #e2e8e6; font-size: 10px; color: #a5b2ae; text-align: center; font-style: italic; }
+
+@media print {
+  body.report-open #app, body.report-open #splash, body.report-open .no-print { display: none !important; }
+  body.report-open #report-overlay { position: static; background: none; padding: 0; overflow: visible; }
+  body.report-open .rp-pagina { box-shadow: none; border-radius: 0; max-width: none; padding: 0; }
+  body.report-open { background: #fff; }
+  .rp-sec, .rp-kpis, .rp-tabela tr { break-inside: avoid; }
+}
+@media (max-width: 640px) { .rp-kpis { grid-template-columns: 1fr 1fr; } .rp-pagina { padding: 22px 18px; } }
