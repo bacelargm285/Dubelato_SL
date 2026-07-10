@@ -203,3 +203,18 @@ code { background: var(--surface-2); border-radius: 6px; padding: 1px 6px; font-
 .logo-img { width: 82%; height: auto; display: block; }
 .logo-disc-sm { width: 44px; height: 44px; margin: 0; box-shadow: 0 3px 8px rgba(20,97,91,.14); }
 .logo-disc-rp { width: 56px; height: 56px; margin: 0; box-shadow: none; border-color: #e2e8e6; }
+
+/* -------- logo transparente: solta no claro, placa no escuro -------- */
+.logo-hero { width: min(230px, 60%); height: auto; margin: 4px auto 10px; display: block; }
+.brand-logo { flex-direction: column; align-items: flex-start; gap: 6px; padding: 10px 10px 20px; }
+.logo-side { width: 138px; height: auto; display: block; }
+.brand-logo .tag { padding-left: 2px; }
+.logo-rp { width: 150px; height: auto; display: block; }
+
+:root[data-theme="dark"] .logo-hero,
+:root[data-theme="dark"] .logo-side {
+  background: #fff;
+  border-radius: 14px;
+  padding: 10px 14px;
+  box-shadow: 0 4px 14px rgba(0,0,0,.28);
+}

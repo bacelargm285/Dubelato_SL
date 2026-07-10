@@ -1659,8 +1659,8 @@
       </div>
       <div class="rp-pagina">
         <header class="rp-head">
-          <div class="logo-disc logo-disc-rp"><img src="logo.png" alt="" class="logo-img"></div>
-          <div><h1>Dubelato · Resumo Executivo</h1><p>${U.ymLabelFull(k)} — gerado em ${hoje.toLocaleDateString('pt-BR')} às ${hoje.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</p></div>
+          <img src="logo.png" alt="Gelateria Dubelato" class="logo-img logo-rp">
+          <div><h1>Resumo Executivo</h1><p>${U.ymLabelFull(k)} — gerado em ${hoje.toLocaleDateString('pt-BR')} às ${hoje.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</p></div>
         </header>
         <div class="rp-kpis">${kpis}</div>
         ${metasHtml}
