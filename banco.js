@@ -142,12 +142,11 @@ DB.banco = (function () {
     }
     A.meses = Object.keys(A.porMes).sort();
 
-    // ---- FLUXO DE CAIXA REAL: saldo diário reconstruído a partir do saldo
-    // final informado no OFX (LEDGERBAL), voltando no tempo lançamento a
-    // lançamento. É o dinheiro que REALMENTE esteve na conta em cada dia. ----
-    if (dados.saldo) {
-      const saldoFim = dados.saldo.valor, dataSaldo = dados.saldo.data;
-      // saldo ao fim de cada dia: parte do saldo do OFX e desconta o que veio depois
+    // ---- FLUXO DE CAIXA REAL: saldo diário. Ideal: reconstruído a partir do
+    // saldo final do OFX (LEDGERBAL). Se o extrato não trouxe saldo (json antigo),
+    // reconstrói o movimento acumulado a partir de zero — a forma da curva e as
+    // variações diárias ficam corretas, só o nível absoluto fica relativo. ----
+    {
       const ordenadas = txs.slice().sort((a, b) => a.data - b.data);
       const porDia = {};
       for (const t of ordenadas) {
@@ -155,18 +154,26 @@ DB.banco = (function () {
         porDia[k] = (porDia[k] || 0) + t.valor;
       }
       const diasK = Object.keys(porDia).sort();
-      // reconstrói: saldo no fim do último dia = saldoFim; recua acumulando
       const serie = [];
-      let saldo = saldoFim;
-      // soma dos lançamentos após a data do saldo (normalmente zero)
-      for (let i = diasK.length - 1; i >= 0; i--) {
-        const dia = new Date(diasK[i] + 'T12:00:00');
-        serie.unshift({ data: dia, saldo });
-        saldo -= porDia[diasK[i]]; // saldo do fim do dia anterior
+      if (dados.saldo) {
+        // reconstrução exata a partir do saldo informado
+        let saldo = dados.saldo.valor;
+        for (let i = diasK.length - 1; i >= 0; i--) {
+          serie.unshift({ data: new Date(diasK[i] + 'T12:00:00'), saldo });
+          saldo -= porDia[diasK[i]];
+        }
+        A.saldoAtual = dados.saldo.valor;
+        A.saldoData = dados.saldo.data;
+        A.saldoExato = true;
+      } else {
+        // acumulado a partir de zero (nível relativo)
+        let saldo = 0;
+        for (const k of diasK) { saldo += porDia[k]; serie.push({ data: new Date(k + 'T12:00:00'), saldo }); }
+        A.saldoAtual = saldo;
+        A.saldoData = A.fim;
+        A.saldoExato = false;
       }
       A.saldoDiario = serie;
-      A.saldoAtual = saldoFim;
-      A.saldoData = dataSaldo;
     }
     A.porCat = {};
     for (const t of txs) {

@@ -97,20 +97,22 @@
     BANCO = DB.banco.carregar();
     BAN = BANCO ? DB.banco.analisar(BANCO, GETNET, M) : null;
     // busca a versão publicada no repositório (visível para todos os sócios)
+    // abas que dependem de banco/getnet e devem se redesenhar quando os dados publicados chegam
+    const VIEWS_DADOS = ['getnet', 'banco', 'antecipacao', 'fluxo', 'dashboard'];
     DB.getnet.carregarPublicado().then(pub => {
       if (!pub) return;
       const localMaisNovo = GETNET?.atualizadoEm && pub.atualizadoEm && GETNET.atualizadoEm > pub.atualizadoEm;
       GETNET = localMaisNovo ? DB.getnet.mesclar(pub, GETNET) : (GETNET ? DB.getnet.mesclar(GETNET, pub) : pub);
       GAN = DB.getnet.analisar(GETNET, M);
       BAN = BANCO ? DB.banco.analisar(BANCO, GETNET, M) : BAN;
-      if (viewAtual === 'getnet' || viewAtual === 'banco') render();
+      if (VIEWS_DADOS.includes(viewAtual)) render();
     });
     DB.banco.carregarPublicado().then(pub => {
       if (!pub) return;
       const localMaisNovo = BANCO?.atualizadoEm && pub.atualizadoEm && BANCO.atualizadoEm > pub.atualizadoEm;
       BANCO = localMaisNovo ? DB.banco.mesclar(pub, BANCO.txs) : (BANCO ? DB.banco.mesclar(BANCO, pub.txs) : pub);
       BAN = DB.banco.analisar(BANCO, GETNET, M);
-      if (viewAtual === 'banco') render();
+      if (VIEWS_DADOS.includes(viewAtual)) render();
     });
     ALERTAS = DB.alerts.run(M, INV);
     montarFiltroMes();
@@ -427,7 +429,7 @@
 
     main.innerHTML = `
       <div class="kpi-grid kpi-grid-4">
-        ${kpiCard({ icon: 'bi-safe2', label: 'Saldo real na conta', valor: U.brl(saldoHoje), sub: 'em ' + U.fmtDate(dataSaldo) + ' (extrato)' })}
+        ${kpiCard({ icon: 'bi-safe2', label: A.saldoExato ? 'Saldo real na conta' : 'Saldo (movimento acumulado)', valor: U.brl(saldoHoje), sub: A.saldoExato ? 'em ' + U.fmtDate(dataSaldo) + ' (extrato)' : 'reimporte o OFX para o saldo exato' })}
         ${kpiCard({ icon: 'bi-graph-down', label: 'Menor saldo do período', valor: U.brl(saldoMin), sub: diaMin ? U.fmtDate(diaMin.data) : '', cls: saldoMin < 1000 ? 'kpi-warn' : '' })}
         ${kpiCard({ icon: 'bi-arrow-left-right', label: 'Fluxo líquido / dia', valor: U.brl(netDia), sub: 'média do extrato', cls: netDia < 0 ? 'kpi-bad' : '' })}
         ${kpiCard({ icon: 'bi-calendar-check', label: 'Já agendado (90d)', valor: U.brl(totalReceb - totalBoletos), sub: U.brl(totalReceb) + ' a receber · ' + U.brl(totalBoletos) + ' boletos' })}
