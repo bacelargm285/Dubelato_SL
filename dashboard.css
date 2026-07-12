@@ -323,3 +323,16 @@ tr:hover td { background: var(--surface-2); }
   .rp-sec, .rp-kpis, .rp-tabela tr { break-inside: avoid; }
 }
 @media (max-width: 640px) { .rp-kpis { grid-template-columns: 1fr 1fr; } .rp-pagina { padding: 22px 18px; } }
+
+/* -------- antecipação: comparação visual -------- */
+.antec-comp { display: flex; flex-direction: column; gap: 14px; margin: 16px 0; }
+.antec-row { display: flex; flex-direction: column; gap: 5px; }
+.antec-lbl { font-size: 13px; font-weight: 600; display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.antec-lbl .dim { font-weight: 400; }
+.antec-track { position: relative; height: 30px; background: var(--surface-2); border-radius: 8px; overflow: hidden; display: flex; align-items: center; }
+.antec-fill { height: 100%; border-radius: 8px; transition: width .5s ease; min-width: 2px; }
+.antec-val { position: absolute; right: 10px; font-variant-numeric: tabular-nums; font-weight: 650; font-size: 13px; color: var(--tx-1); }
+.antec-resumo { display: flex; flex-wrap: wrap; gap: 10px 26px; padding: 14px 16px; background: var(--surface-2); border-radius: 12px; margin-top: 4px; }
+.antec-resumo > div { display: flex; flex-direction: column; gap: 2px; }
+.antec-resumo strong { font-size: 16px; font-variant-numeric: tabular-nums; }
+.antec-resumo strong.neg { color: var(--neg); }

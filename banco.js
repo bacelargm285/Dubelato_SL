@@ -177,6 +177,11 @@ DB.banco = (function () {
           custoMensalMax: liqCredMes * tetoP / 100,
           liqCredMes, diasSobrep,
           bloco: { de, ate },
+          // comparação lado a lado no período de sobreposição:
+          brutoCredito: U.sum(cred.filter(c => dentro(c.data, de, ate)), c => c.bruto),
+          liquidoSemAntecipacao: liqCredSobrep,   // o que a Getnet pagaria em D+30 (já sem a taxa da maquininha)
+          recebidoComAntecipacao: antSobrep,      // o que caiu na conta agora, via antecipação (OFX)
+          custoNoPeriodo: liqCredSobrep - antSobrep,
         };
       }
     }

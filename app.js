@@ -1265,14 +1265,32 @@
       ${kpiCard({ icon: 'bi-percent', label: 'Tarifas bancárias', valor: U.brl(A.tarifas.total), sub: 'no período · ' + dias + ' dias', invert: true })}
     </div>`;
 
-    // custo da antecipação
+    // custo da antecipação — comparação visual Getnet (sem antecipar) × OFX (antecipado)
     let antecCard = '';
     if (A.custoAntecipacao) {
       const c = A.custoAntecipacao;
-      antecCard = `<div class="alerta ${c.desagioPct > 2 ? 'warn' : 'ok'}"><i class="bi bi-cash-coin"></i><div>
-        <strong>Custo da antecipação (cessão da Getnet): ~${U.pct(c.desagioPct)} do crédito</strong>
-        <p>Você antecipa praticamente toda a agenda de crédito. Comparando o que a Getnet apurou de líquido de crédito com o que efetivamente caiu na conta como antecipação (${U.fmtDate(c.bloco.de)}–${U.fmtDate(c.bloco.ate)}), o deságio fica na faixa de <strong>${U.pct(c.faixaMin)}–${U.pct(c.faixaMax)}</strong>. Sobre um volume de crédito de ~${U.brl(c.liqCredMes)}/mês, isso representa cerca de <strong>${U.brl(c.custoMensalEst)}/mês</strong> (${U.brl(c.custoMensalMin)}–${U.brl(c.custoMensalMax)}) — o preço de receber à vista em vez de esperar 30 dias. Vale comparar com o custo de um capital de giro equivalente.</p>
-      </div></div>`;
+      const max = Math.max(c.brutoCredito, c.liquidoSemAntecipacao, c.recebidoComAntecipacao) || 1;
+      const w = v => (v / max * 100).toFixed(1);
+      const barra = (rotulo, valor, sub, cor, extra = '') => `
+        <div class="antec-row">
+          <div class="antec-lbl">${rotulo}<span class="dim">${sub}</span></div>
+          <div class="antec-track"><div class="antec-fill" style="width:${w(valor)}%;background:${cor}"></div>
+            <span class="antec-val">${U.brl(valor)}</span></div>
+          ${extra}
+        </div>`;
+      antecCard = card('Antecipação de crédito — Getnet × conta bancária', `
+        <p class="note" style="margin-top:0">Você antecipa quase toda a agenda de crédito, então o dinheiro entra pela conta (OFX) e não pela agenda da Getnet. Veja o que a antecipação custa: partindo das <strong>vendas de crédito da maquininha</strong> (${U.fmtDate(c.bloco.de)}–${U.fmtDate(c.bloco.ate)}), quanto você <em>receberia</em> esperando 30 dias vs. quanto <em>recebeu à vista</em>.</p>
+        <div class="antec-comp">
+          ${barra('Vendas de crédito (bruto)', c.brutoCredito, 'valor cheio das vendas no crédito', 'var(--tx-3)')}
+          ${barra('Sem antecipar — receberia em ~30 dias', c.liquidoSemAntecipacao, 'já sem a taxa normal da maquininha', 'var(--teal)')}
+          ${barra('Antecipando — recebeu à vista (caiu na conta)', c.recebidoComAntecipacao, 'valor que entrou pelo banco', 'var(--gold)')}
+        </div>
+        <div class="antec-resumo">
+          <div><span class="dim">Custo da antecipação no período</span><strong class="neg">− ${U.brl(c.custoNoPeriodo)}</strong></div>
+          <div><span class="dim">Deságio sobre o crédito</span><strong>${U.pct(c.desagioPct)} <span class="dim">(faixa ${U.pct(c.faixaMin)}–${U.pct(c.faixaMax)})</span></strong></div>
+          <div><span class="dim">Projeção mensal</span><strong class="neg">~ ${U.brl(c.custoMensalEst)}/mês</strong></div>
+        </div>
+        <p class="note">Ou seja: a diferença entre a barra verde e a dourada é o preço de não esperar. No mês, isso equivale a ~${U.brl(c.custoMensalEst)}. Faz sentido enquanto esse custo for menor que o de um capital de giro no mesmo valor — quando a parcela do Tortelli sair (novembro), vale reavaliar se ainda precisa antecipar tudo.</p>`);
     }
 
     // composição por categoria
