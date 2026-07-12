@@ -130,6 +130,7 @@ DB.finance = (function () {
 
     /* ---- Projeção de caixa (dia a dia, 90 dias) ---- */
     const proj = projetarCaixa(byMonth, meses, saldoAtual, boletosFuturos, hoje);
+    const recorrentes = detectarRecorrentes(txs);
 
     return {
       cfg, txs, byMonth, meses, boletos, boletosFuturos, boletosPorMes,
@@ -140,8 +141,34 @@ DB.finance = (function () {
         saldoAtual, custoFixoMedio, capitalGiro, capitalGiroMeses, reservaMeses,
         totalBoletosFuturos, cmvPctMedio, pontoEquilibrio, margemContribuicao,
       },
-      proj,
+      proj, recorrentes,
     };
+  }
+
+  /** Saídas fixas recorrentes: mesma descrição-base em 3+ meses, com dia típico
+   *  do mês e valor médio. Alimenta a projeção de fluxo com os compromissos que
+   *  saem todo mês (salário, aluguel, luz, royalty, etc.). */
+  function detectarRecorrentes(txs) {
+    const rec = {};
+    for (const t of txs) {
+      if (t.tipo !== 'Saída' || t.grupo === 'transferencia') continue;
+      const kd = U.norm(t.desc).replace(/\d+/g, '').trim();
+      if (!kd || kd.length < 3) continue;
+      const r = rec[kd] || (rec[kd] = { desc: t.desc, grupo: t.grupo || 'outros', meses: new Set(), valores: [], dias: [] });
+      r.meses.add(t.mes); r.valores.push(t.valor); r.dias.push(t.date.getDate());
+    }
+    return Object.values(rec)
+      .filter(r => r.meses.size >= 3)
+      .map(r => {
+        const dias = r.dias.slice().sort((a, b) => a - b);
+        return {
+          desc: r.desc, grupo: r.grupo, nMeses: r.meses.size,
+          valorMedio: U.avg(r.valores),
+          diaMes: dias[Math.floor(dias.length / 2)],
+          dispersao: Math.max(...dias) - Math.min(...dias),
+        };
+      })
+      .sort((a, b) => b.valorMedio - a.valorMedio);
   }
 
   /** Projeção: média diária de entradas/saídas operacionais dos últimos 30 dias + boletos nas datas */

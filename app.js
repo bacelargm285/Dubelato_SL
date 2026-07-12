@@ -428,6 +428,27 @@
     if (M.boletos) for (const b of M.boletos) if (b.venc && b.venc > hoje) eventos.push({ data: b.venc, valor: -b.valor, tipo: 'boleto', desc: b.desc });
     if (GAN && GAN.recebiveis) for (const r of GAN.recebiveis) if (r.venc && r.venc > hoje) eventos.push({ data: r.venc, valor: r.valor, tipo: 'receb', desc: r.bandeira });
 
+    // SAÍDAS FIXAS RECORRENTES (salário, aluguel, luz, royalty, impostos…) no
+    // dia típico do mês. Excluímos: boletos de matéria-prima (grupo cmv) e
+    // financiamentos (Tortelli/Celso), que entram pela aba Boletos com data
+    // exata — evita dupla contagem e datas estimadas erradas.
+    const recorrentesFixos = (M.recorrentes || []).filter(r => r.grupo !== 'cmv' && r.grupo !== 'financiamento' && r.valorMedio >= 200);
+    const gruposDesc = { financiamento: 'Financiamento', fixos: 'Aluguel/fixos', folha: 'Folha', impostos: 'Impostos', marketing: 'Marketing', outros: 'Outros' };
+    function eventosRecorrentesNoMes(ano, mes) {
+      const diasNoMes = new Date(ano, mes + 1, 0).getDate();
+      return recorrentesFixos.map(r => {
+        const dia = Math.min(r.diaMes, diasNoMes);
+        return { data: new Date(ano, mes, dia), valor: -r.valorMedio, tipo: 'fixo', desc: r.desc, grupo: r.grupo };
+      });
+    }
+    // gera os recorrentes para cada mês dentro do horizonte
+    const fimHoriz = new Date(hoje); fimHoriz.setDate(fimHoriz.getDate() + horizonte);
+    for (let mesCursor = new Date(hoje.getFullYear(), hoje.getMonth(), 1); mesCursor <= fimHoriz; mesCursor.setMonth(mesCursor.getMonth() + 1)) {
+      for (const ev of eventosRecorrentesNoMes(mesCursor.getFullYear(), mesCursor.getMonth())) {
+        if (ev.data > hoje && ev.data <= fimHoriz) eventos.push(ev);
+      }
+    }
+
     // ENTRADA DE CAIXA DIÁRIA (loja abre todo dia): débito cai em D+1, PIX e
     // dinheiro entram na hora. Crédito NÃO entra aqui (já vem pelos recebíveis
     // da agenda Getnet, para não contar em dobro). Estima a venda de cada dia
@@ -471,6 +492,13 @@
     const primeiroNeg = projSerie.find(s => s.saldo < 0);
     const totalBoletos = U.sum(eventos.filter(e => e.tipo === 'boleto'), e => Math.abs(e.valor));
     const totalReceb = U.sum(eventos.filter(e => e.tipo === 'receb'), e => e.valor);
+    const totalFixos = U.sum(eventos.filter(e => e.tipo === 'fixo'), e => Math.abs(e.valor));
+
+    // perfil de custo por período do mês (soma dos recorrentes fixos + boletos por faixa de dia)
+    const saidasFuturas = eventos.filter(e => e.valor < 0);
+    const faixa = [{ nome: 'Dias 1–10', min: 1, max: 10, total: 0 }, { nome: 'Dias 11–20', min: 11, max: 20, total: 0 }, { nome: 'Dias 21–31', min: 21, max: 31, total: 0 }];
+    for (const e of saidasFuturas) { const d = e.data.getDate(); const f = faixa.find(f => d >= f.min && d <= f.max); if (f) f.total += Math.abs(e.valor); }
+    const totalFaixas = U.sum(faixa, f => f.total) || 1;
 
     const status = primeiroNeg
       ? `<div class="alerta bad"><i class="bi bi-exclamation-octagon"></i><div><strong>Atenção ao caixa</strong><p>Considerando saldo atual, a venda diária estimada, boletos a vencer e recebíveis já agendados, a conta pode ficar negativa por volta de ${U.fmtDate(primeiroNeg.data)}. Vale antecipar recebível, negociar prazo de boleto ou segurar despesa.</p></div></div>`
@@ -482,22 +510,31 @@
         ${kpiCard({ icon: 'bi-safe2', label: A.saldoExato ? 'Saldo real na conta' : 'Saldo (movimento acumulado)', valor: U.brl(saldoHoje), sub: A.saldoExato ? 'em ' + U.fmtDate(dataSaldo) + ' (extrato)' : 'reimporte o OFX para o saldo exato' })}
         ${kpiCard({ icon: 'bi-graph-down', label: 'Menor saldo projetado', valor: U.brl(Math.min(saldoMin, ...projSerie.map(s => s.saldo))), cls: Math.min(...projSerie.map(s => s.saldo)) < 1000 ? 'kpi-warn' : '' })}
         ${kpiCard({ icon: 'bi-cash-stack', label: 'Entrada de venda (90d)', valor: U.brl(entradaVendaTotal), sub: 'débito + PIX + dinheiro estimados' })}
-        ${kpiCard({ icon: 'bi-calendar-check', label: 'Já agendado (90d)', valor: U.brl(totalReceb - totalBoletos), sub: U.brl(totalReceb) + ' receb. · ' + U.brl(totalBoletos) + ' boletos' })}
+        ${kpiCard({ icon: 'bi-calendar-check', label: 'Saídas fixas / mês', valor: U.brl(totalFixos / 3), sub: 'salário, aluguel, luz, impostos…' })}
       </div>
-      ${card('Saldo real na conta × projeção dos próximos 90 dias', '<div class="chart-box tall"><canvas id="ch-fluxo-real"></canvas></div><p class="note">A linha cheia é o saldo que <strong>de fato</strong> esteve na conta (extrato Santander). A pontilhada projeta a partir de hoje somando, a cada dia: a <strong>venda estimada em débito (D+1), PIX e dinheiro</strong>' + (temPrevisao ? ' pela previsão de vendas (clima × calendário)' : ' pela média por dia da semana') + ', os recebíveis de crédito já agendados na Getnet, e os boletos que vencem.</p>')}
+      ${card('Saldo real na conta × projeção dos próximos 90 dias', '<div class="chart-box tall"><canvas id="ch-fluxo-real"></canvas></div><p class="note">A linha cheia é o saldo que <strong>de fato</strong> esteve na conta (extrato Santander). A pontilhada projeta a partir de hoje: <strong>+</strong> venda diária em débito, PIX e dinheiro' + (temPrevisao ? ' (previsão clima × calendário)' : ' (média por dia da semana)') + ' e recebíveis de crédito da Getnet; <strong>−</strong> as saídas fixas recorrentes no dia típico de cada uma e os boletos que vencem.</p>')}
       ${status}
-      ${!temPrevisao ? '<div class="alerta warn"><i class="bi bi-lightbulb"></i><div><strong>Dica: melhore a precisão</strong><p>Abra a aba <strong>Clima × Vendas</strong> e clique em carregar a análise. Com ela, a projeção de venda diária passa a considerar temperatura, feriados e férias — bem mais precisa que a média simples usada agora.</p></div></div>' : ''}
-      ${card('O que já está agendado para os próximos 90 dias', (() => {
-        const evOrd = eventos.filter(e => e.data <= projSerie[projSerie.length - 1].data).sort((a, b) => a.data - b.data).slice(0, 25);
-        if (!evOrd.length) return '<p class="note">Sem boletos ou recebíveis agendados no período.</p>';
+      ${card('Calendário de custos do mês — quando o caixa aperta', `
+        <p class="note" style="margin-top:0">As saídas fixas não se distribuem por igual no mês. Veja onde precisa ter mais dinheiro em caixa:</p>
+        <div class="antec-comp">
+          ${faixa.map(f => `<div class="antec-row"><div class="antec-lbl">${f.nome}<span class="dim">${U.pct(f.total / totalFaixas * 100, 0)} das saídas</span></div>
+            <div class="antec-track"><div class="antec-fill" style="width:${(f.total / totalFaixas * 100).toFixed(1)}%;background:${f.total / totalFaixas > 0.4 ? 'var(--berry)' : f.total / totalFaixas > 0.3 ? 'var(--gold)' : 'var(--teal)'}"></div>
+              <span class="antec-val">${U.brl(f.total)}</span></div></div>`).join('')}
+        </div>
+        <p class="note">${faixa[0].total > faixa[2].total * 1.5 ? 'A <strong>primeira quinzena é a mais pesada</strong> — concentra salários, aluguel e financiamento. É quando o caixa precisa estar mais reforçado.' : 'Os custos estão relativamente distribuídos ao longo do mês.'}</p>`)}
+      ${!temPrevisao ? '<div class="alerta warn"><i class="bi bi-lightbulb"></i><div><strong>Dica: melhore a precisão</strong><p>Abra a aba <strong>Clima × Vendas</strong> e carregue a análise. A projeção de venda diária passa a considerar temperatura, feriados e férias.</p></div></div>' : ''}
+      ${card('Compromissos dos próximos 90 dias', (() => {
+        const evOrd = eventos.filter(e => e.data <= projSerie[projSerie.length - 1].data).sort((a, b) => a.data - b.data).slice(0, 40);
+        if (!evOrd.length) return '<p class="note">Sem compromissos agendados no período.</p>';
+        const tipoLabel = { boleto: '<i class="bi bi-arrow-up-right neg"></i> Boleto', receb: '<i class="bi bi-arrow-down-left pos"></i> Recebível', fixo: '<i class="bi bi-arrow-repeat warn-text"></i> Fixo mensal' };
         const rows = evOrd.map(e => `<tr>
           <td class="mono">${U.fmtDate(e.data)}</td>
-          <td>${e.tipo === 'boleto' ? '<i class="bi bi-arrow-up-right neg"></i> Boleto' : '<i class="bi bi-arrow-down-left pos"></i> Recebível'} ${U.esc(e.desc || '')}</td>
+          <td>${tipoLabel[e.tipo] || ''} ${U.esc(e.desc || '')}</td>
           <td class="mono right ${e.valor < 0 ? 'neg' : 'pos'}">${U.brl(e.valor)}</td>
         </tr>`).join('');
         return `<div class="table-wrap"><table><thead><tr><th>Data</th><th>Compromisso</th><th class="right">Valor</th></tr></thead><tbody>${rows}</tbody></table></div>`;
       })())}
-      ${card('Como este fluxo é calculado', `<p class="note">Parte do <strong>saldo real</strong> do extrato (${U.brl(saldoHoje)} em ${U.fmtDate(dataSaldo)}) e reconstrói quanto esteve na conta a cada dia. Para frente, todo dia soma a <strong>venda estimada que entra no caixa</strong> — débito (cai em D+1), PIX (na hora) e dinheiro (~12% do balcão) — mais os recebíveis de crédito da agenda Getnet (o crédito não é contado duas vezes) e menos os boletos. Proporções medidas nos seus dados: débito ${U.pct(mix.debito * 100)}, PIX ${U.pct(mix.pix * 100)} do que passa na maquininha.</p>`)}`;
+      ${card('Como este fluxo é calculado', `<p class="note">Parte do <strong>saldo real</strong> do extrato (${U.brl(saldoHoje)} em ${U.fmtDate(dataSaldo)}). Para frente, cada dia soma a <strong>venda que entra no caixa</strong> — débito (D+1), PIX e dinheiro (~12% do balcão) — mais recebíveis de crédito da Getnet, e subtrai as <strong>saídas fixas recorrentes</strong> no dia típico de cada uma (salário ~dia 6, aluguel ~dia 5, royalty ~dia 10, impostos ~dia 20…) e os boletos da aba Boletos (matéria-prima e financiamentos com data exata). Recorrentes detectados automaticamente: ${recorrentesFixos.length} itens somando ${U.brl(totalFixos / 3)}/mês.</p>`)}`;
 
     const p = DB.charts.palette();
     const passoR = Math.max(1, Math.floor(serie.length / 30));
