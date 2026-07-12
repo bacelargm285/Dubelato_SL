@@ -337,3 +337,18 @@ tr:hover td { background: var(--surface-2); }
 .antec-resumo strong { font-size: 16px; font-variant-numeric: tabular-nums; }
 .antec-resumo strong.neg { color: var(--neg); }
 .dim-row td { opacity: .6; }
+
+/* -------- consultoria: plano de ação -------- */
+.consel { padding: 14px 0; border-bottom: 1px solid var(--line); }
+.consel:last-child { border-bottom: none; }
+.consel-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.consel-head strong { font-size: 14.5px; }
+.consel-impacto { font-variant-numeric: tabular-nums; font-weight: 650; color: var(--berry); font-size: 13px; white-space: nowrap; }
+.consel p { margin: 4px 0 0; color: var(--tx-2); }
+.retirada-box { display: flex; gap: 14px; padding: 16px; border-radius: 14px; margin-bottom: 6px; }
+.retirada-box.pode { background: linear-gradient(120deg, rgba(31,138,128,.12), rgba(192,145,63,.08)); border: 1px solid rgba(31,138,128,.3); }
+.retirada-box.espere { background: var(--surface-2); border: 1px solid var(--line); }
+.retirada-icone { font-size: 30px; color: var(--teal); flex: none; }
+.retirada-box.espere .retirada-icone { color: var(--tx-3); }
+.retirada-titulo { font-family: 'Fraunces', serif; font-size: 17px; font-weight: 600; margin-bottom: 4px; }
+.retirada-box p { margin: 4px 0 0; }

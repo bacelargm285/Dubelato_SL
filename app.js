@@ -14,6 +14,7 @@
   let GAN = null;        // análise getnet
   let BANCO = null;      // extrato bancário (localStorage)
   let BAN = null;        // análise do banco
+  let FLUXO_RESUMO = null; // resumo da projeção de fluxo (para a Consultoria)
   let ALERTAS = [];
   let mesFiltro = 'atual';   // 'atual' | '2026-03' | 'todos'
   let tortelliInvest = localStorage.getItem('db_tortelli') === '1';
@@ -490,6 +491,8 @@
       projSerie.push({ data: dia, saldo: saldoP });
     }
     const primeiroNeg = projSerie.find(s => s.saldo < 0);
+    // expõe resumo do fluxo para a Consultoria
+    FLUXO_RESUMO = { primeiroNeg: primeiroNeg ? primeiroNeg.data : null, piorSaldo: Math.min(...projSerie.map(s => s.saldo)), saldoHoje };
     const totalBoletos = U.sum(eventos.filter(e => e.tipo === 'boleto'), e => Math.abs(e.valor));
     const totalReceb = U.sum(eventos.filter(e => e.tipo === 'receb'), e => e.valor);
     const totalFixos = U.sum(eventos.filter(e => e.tipo === 'fixo'), e => Math.abs(e.valor));
@@ -2103,6 +2106,52 @@
   }
 
   function viewConsultoria(main) {
+    // garante que o fluxo foi calculado (a consultoria depende dele)
+    if (!FLUXO_RESUMO && BAN && BAN.saldoDiario && BAN.saldoDiario.length >= 5) {
+      // renderiza o fluxo invisível uma vez para popular FLUXO_RESUMO
+      const tmp = document.createElement('div');
+      try { viewFluxoReal(tmp); } catch (e) { /* ignora */ }
+    }
+    const plano = DB.consultoria.gerar(M, GAN, BAN, FLUXO_RESUMO);
+    const iconePor = { ok: 'bi-check-circle', info: 'bi-info-circle', warn: 'bi-exclamation-triangle', bad: 'bi-exclamation-octagon' };
+
+    // ---- 1. Onde melhorar ----
+    const prioBadge = { alta: '<span class="badge bad">prioridade alta</span>', media: '<span class="badge warn">média</span>', info: '<span class="badge">informativo</span>' };
+    const melhoriasHtml = plano.melhorias.length ? plano.melhorias.map(m => `
+      <div class="consel">
+        <div class="consel-head">
+          <strong>${U.esc(m.titulo)}</strong>
+          ${m.impacto ? `<span class="consel-impacto">${U.brl(m.impacto)}/mês em jogo</span>` : ''}
+        </div>
+        <div class="consel-head" style="margin:2px 0 8px">${prioBadge[m.prioridade] || ''}</div>
+        <p>${m.texto}</p>
+      </div>`).join('') : '<div class="alerta ok"><i class="bi bi-check-circle"></i><div><p>Nenhum grupo de custo está fora da referência. Estrutura saudável.</p></div></div>';
+
+    // ---- 2. Segurança de caixa ----
+    const segHtml = plano.seguranca.pontos.map(p =>
+      `<div class="alerta ${p.tipo}"><i class="bi ${iconePor[p.tipo] || 'bi-dot'}"></i><div><p>${p.texto}</p></div></div>`).join('');
+
+    // ---- 3. Retirada ----
+    const r = plano.retirada;
+    const retiradaCard = `
+      <div class="retirada-box ${r.podeRetirar ? 'pode' : 'espere'}">
+        <div class="retirada-icone"><i class="bi ${r.podeRetirar ? 'bi-cash-coin' : 'bi-pause-circle'}"></i></div>
+        <div>
+          <div class="retirada-titulo">${r.podeRetirar ? `Pode retirar até ${U.brl(r.valorSugerido)} agora` : 'Melhor não retirar neste momento'}</div>
+          <p>${r.texto}</p>
+          ${r.detalhe.map(d => `<p class="dim">${d.texto}</p>`).join('')}
+        </div>
+      </div>
+      ${r.mesesBons.length ? `<p class="note">Historicamente, os meses de melhor resultado (bons candidatos para distribuir lucro) foram: ${r.mesesBons.map(m => `<strong>${U.ymLabel(m.mes)}</strong> (${U.brl(m.resultado)})`).join(', ')}. Meses de alta temporada (verão) tendem a permitir retiradas maiores; no inverno, segure mais.</p>` : ''}`;
+
+    main.innerHTML = `
+      ${card('<i class="bi bi-clipboard2-pulse"></i> Onde você pode melhorar', melhoriasHtml)}
+      ${card('<i class="bi bi-shield-check"></i> Segurança do caixa — como não ficar no vermelho', segHtml || '<p class="note">Carregue o extrato bancário para a análise de segurança de caixa.</p>')}
+      ${card('<i class="bi bi-wallet2"></i> Dá para tirar dinheiro pro bolso?', retiradaCard)}
+      <p class="note dim">Análise gerada a partir dos seus dados reais (planilha, Getnet e extrato). Recomendações são orientações, não garantias — o dono decide com o contexto que só ele tem.</p>`;
+  }
+
+  function viewConsultoriaAntiga(main) {
     const paras = DB.analytics.resumoExecutivo(M, INV);
     const ins = DB.analytics.insights(M, INV);
     const iconePor = { ok: 'bi-check-circle', info: 'bi-info-circle', warn: 'bi-exclamation-triangle', bad: 'bi-exclamation-octagon' };
