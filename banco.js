@@ -115,6 +115,17 @@ DB.banco = (function () {
     const soma = pred => U.sum(txs.filter(pred), t => Math.abs(t.valor));
     A.entradas = soma(t => t.valor > 0);
     A.saidas = soma(t => t.valor < 0);
+
+    // séries mensais (para volume grande de extrato): entradas, saídas, tarifas, resultado
+    A.porMes = {};
+    for (const t of txs) {
+      const m = A.porMes[t.mes] || (A.porMes[t.mes] = { mes: t.mes, entradas: 0, saidas: 0, tarifas: 0, antecipacao: 0, n: 0 });
+      if (t.valor > 0) m.entradas += t.valor; else m.saidas += Math.abs(t.valor);
+      if (t.cat === 'tarifa') m.tarifas += Math.abs(t.valor);
+      if (t.cat === 'getnet_antecipacao') m.antecipacao += t.valor;
+      m.n++;
+    }
+    A.meses = Object.keys(A.porMes).sort();
     A.porCat = {};
     for (const t of txs) {
       const c = A.porCat[t.cat] || (A.porCat[t.cat] = { id: t.cat, rotulo: ROTULOS[t.cat], total: 0, n: 0, itens: [] });

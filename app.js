@@ -1257,6 +1257,7 @@
     const A = BAN;
     const dias = Math.round((A.fim - A.ini) / 86400000) + 1;
     const saldoLiquido = A.entradas - A.saidas;
+    const multiMes = A.meses.length >= 2;
 
     const kpis = `<div class="kpi-grid kpi-grid-4">
       ${kpiCard({ icon: 'bi-arrow-down-left', label: 'Entradas no período', valor: U.brl(A.entradas), sub: U.fmtDate(A.ini) + ' a ' + U.fmtDate(A.fim) })}
@@ -1310,6 +1311,7 @@
     main.innerHTML = `
       ${card('Banco · Conta Santander', uploader)}
       ${kpis}
+      ${multiMes ? card('Evolução mês a mês na conta', '<div class="chart-box tall"><canvas id="ch-bn-mes"></canvas></div><p class="note">Entradas, saídas e resultado líquido de cada mês pelo extrato — a saúde real do caixa ao longo do tempo.</p>') : ''}
       ${antecCard}
       <div class="grid-2">
         ${card('Para onde foi / de onde veio', '<div class="chart-box tall"><canvas id="ch-bn-cat"></canvas></div>')}
@@ -1334,6 +1336,13 @@
     const p = DB.charts.palette();
     const catsCh = cats.slice(0, 8);
     DB.charts.barrasHoriz('ch-bn-cat', catsCh.map(c => c.rotulo), catsCh.map(c => c.total), p.pistache);
+    if (multiMes) {
+      DB.charts.barras('ch-bn-mes', A.meses.map(U.ymLabel), [
+        { label: 'Entradas', data: A.meses.map(m => A.porMes[m].entradas), color: p.pistache },
+        { label: 'Saídas', data: A.meses.map(m => A.porMes[m].saidas), color: p.amarena },
+        { label: 'Resultado', data: A.meses.map(m => A.porMes[m].entradas - A.porMes[m].saidas), color: p.gold },
+      ]);
+    }
   }
 
   function ligarUploadBanco() {
