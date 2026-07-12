@@ -52,3 +52,16 @@ A aba **Producao_Cubas** da planilha registra a produção diária:
 O menu **Cubas Vendidas** mostra ranking de sabores, sazonalidade mês a mês,
 divisão por produtor e custo estimado (sabores com receita cadastrada).
 Grafias diferentes do mesmo sabor são unificadas automaticamente.
+
+## Banco (extrato OFX)
+
+No menu **Banco**, exporte o extrato da conta Santander Empresas em formato
+**OFX** e arraste no site. Pode juntar vários meses — não duplica (usa o FITID
+de cada lançamento). Análises: categorização automática (PIX, boletos, tarifas,
+antecipação Getnet, iFood, impostos), **custo real da antecipação de crédito**
+(cruzando com a Getnet), tarifas bancárias detalhadas e **conferência de
+boletos** (planilha × débitos na conta).
+
+Para os sócios verem: botão **Baixar arquivo para publicar** gera o
+`banco_dados.json`, que você sobe no repositório junto da planilha e do
+`getnet_dados.json`. São os 3 arquivos de dados atualizados pelo mesmo caminho.

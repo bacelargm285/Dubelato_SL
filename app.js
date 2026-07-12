@@ -12,6 +12,8 @@
   let GETNET = null;     // dados da maquininha (localStorage)
   let PROD = null;       // produção de cubas
   let GAN = null;        // análise getnet
+  let BANCO = null;      // extrato bancário (localStorage)
+  let BAN = null;        // análise do banco
   let ALERTAS = [];
   let mesFiltro = 'atual';   // 'atual' | '2026-03' | 'todos'
   let tortelliInvest = localStorage.getItem('db_tortelli') === '1';
@@ -92,13 +94,23 @@
     PROD = RAW.producao && RAW.producao.length ? DB.producao.build(RAW.producao, CUBAS) : null;
     GETNET = DB.getnet.carregar();
     GAN = GETNET ? DB.getnet.analisar(GETNET, M) : null;
+    BANCO = DB.banco.carregar();
+    BAN = BANCO ? DB.banco.analisar(BANCO, GETNET, M) : null;
     // busca a versão publicada no repositório (visível para todos os sócios)
     DB.getnet.carregarPublicado().then(pub => {
       if (!pub) return;
       const localMaisNovo = GETNET?.atualizadoEm && pub.atualizadoEm && GETNET.atualizadoEm > pub.atualizadoEm;
       GETNET = localMaisNovo ? DB.getnet.mesclar(pub, GETNET) : (GETNET ? DB.getnet.mesclar(GETNET, pub) : pub);
       GAN = DB.getnet.analisar(GETNET, M);
-      if (viewAtual === 'getnet') render();
+      BAN = BANCO ? DB.banco.analisar(BANCO, GETNET, M) : BAN;
+      if (viewAtual === 'getnet' || viewAtual === 'banco') render();
+    });
+    DB.banco.carregarPublicado().then(pub => {
+      if (!pub) return;
+      const localMaisNovo = BANCO?.atualizadoEm && pub.atualizadoEm && BANCO.atualizadoEm > pub.atualizadoEm;
+      BANCO = localMaisNovo ? DB.banco.mesclar(pub, BANCO.txs) : (BANCO ? DB.banco.mesclar(BANCO, pub.txs) : pub);
+      BAN = DB.banco.analisar(BANCO, GETNET, M);
+      if (viewAtual === 'banco') render();
     });
     ALERTAS = DB.alerts.run(M, INV);
     montarFiltroMes();
@@ -182,7 +194,7 @@
       const fn = {
         dashboard: viewDashboard, dre: viewDRE, fluxo: viewFluxo, entradas: () => viewLancamentos('Entrada'),
         saidas: viewSaidas, boletos: viewBoletos, estoque: viewEstoque,
-        ifood: viewIfood, funcionarios: viewFuncionarios, marketing: viewMarketing, cubas: viewCubas, getnet: viewGetnet, producao: viewProducao, nutricional: viewNutricional,
+        ifood: viewIfood, funcionarios: viewFuncionarios, marketing: viewMarketing, cubas: viewCubas, getnet: viewGetnet, banco: viewBanco, producao: viewProducao, nutricional: viewNutricional,
         comparativos: viewComparativos, clima: viewClima, consultoria: viewConsultoria, alertas: viewAlertas, config: viewConfig,
       }[viewAtual] || viewDashboard;
       main.innerHTML = '';
@@ -1194,6 +1206,145 @@
       inp.type = 'file'; inp.accept = '.pdf,.csv'; inp.multiple = true; inp.hidden = true; inp.id = 'getnet-file-input';
       document.body.appendChild(inp);
       inp.addEventListener('change', e => { if (e.target.files.length) processarPdfsGetnet([...e.target.files]); inp.value = ''; });
+    }
+    btn.addEventListener('click', () => inp.click());
+  }
+
+  /* ---------- BANCO (extrato OFX) ---------- */
+
+  async function processarOfx(files) {
+    const status = $('#banco-status');
+    if (status) status.textContent = 'Lendo extrato…';
+    try {
+      let novos = [];
+      for (const f of files) {
+        const buf = await f.arrayBuffer();
+        novos.push(...DB.banco.parseOfx(buf));
+      }
+      if (!novos.length) {
+        alert('Não encontrei lançamentos nesse arquivo. Exporte o extrato em formato OFX pelo app do Santander Empresas.');
+        if (status) status.textContent = '';
+        return;
+      }
+      BANCO = DB.banco.mesclar(BANCO, novos);
+      DB.banco.salvar(BANCO);
+      BAN = DB.banco.analisar(BANCO, GETNET, M);
+      render();
+    } catch (err) {
+      console.error(err);
+      alert('Erro ao ler o extrato: ' + err.message);
+      if (status) status.textContent = '';
+    }
+  }
+
+  function viewBanco(main) {
+    const uploader = `
+      <div class="cuba-toggle" style="margin-bottom:4px">
+        <button class="side-btn" id="btn-banco-up" style="max-width:300px"><i class="bi bi-bank"></i> Carregar extrato do banco (OFX)</button>
+        ${BANCO ? `<button class="side-btn" id="btn-banco-pub" style="max-width:320px"><i class="bi bi-cloud-arrow-up"></i> Baixar arquivo para publicar no GitHub</button>` : ''}
+        <span id="banco-status" class="dim"></span>
+        ${BANCO ? `<button class="side-btn" id="btn-banco-clear" style="max-width:150px;margin-left:auto"><i class="bi bi-trash3"></i> Limpar</button>` : ''}
+      </div>
+      <p class="note dim">Exporte o extrato da conta em <strong>OFX</strong> pelo app do Santander Empresas e arraste aqui — pode juntar vários meses, o sistema não duplica (usa o identificador único de cada lançamento). ${BANCO?.atualizadoEm ? 'Última atualização: ' + BANCO.atualizadoEm.toLocaleString('pt-BR') + '.' : ''}</p>
+      ${BANCO ? `<p class="note"><strong>Para os sócios verem:</strong> clique em <em>Baixar arquivo para publicar</em> e suba o <code>banco_dados.json</code> no repositório, junto da planilha e do getnet_dados.json.</p>` : ''}`;
+
+    if (!BAN) {
+      main.innerHTML = card('Banco · Conta Santander', uploader + '<p class="note" style="margin-top:10px">Nenhum extrato carregado ainda. Assim que você trouxer o OFX, aparecem aqui as tarifas, o custo real da antecipação da Getnet e a conferência dos boletos.</p>');
+      ligarUploadBanco();
+      return;
+    }
+
+    const A = BAN;
+    const dias = Math.round((A.fim - A.ini) / 86400000) + 1;
+    const saldoLiquido = A.entradas - A.saidas;
+
+    const kpis = `<div class="kpi-grid kpi-grid-4">
+      ${kpiCard({ icon: 'bi-arrow-down-left', label: 'Entradas no período', valor: U.brl(A.entradas), sub: U.fmtDate(A.ini) + ' a ' + U.fmtDate(A.fim) })}
+      ${kpiCard({ icon: 'bi-arrow-up-right', label: 'Saídas no período', valor: U.brl(A.saidas), invert: true })}
+      ${kpiCard({ icon: 'bi-wallet2', label: 'Resultado no banco', valor: U.brl(saldoLiquido), cls: saldoLiquido < 0 ? 'kpi-warn' : '' })}
+      ${kpiCard({ icon: 'bi-percent', label: 'Tarifas bancárias', valor: U.brl(A.tarifas.total), sub: 'no período · ' + dias + ' dias', invert: true })}
+    </div>`;
+
+    // custo da antecipação
+    let antecCard = '';
+    if (A.custoAntecipacao) {
+      const c = A.custoAntecipacao;
+      antecCard = `<div class="alerta ${c.desagioPct > 2 ? 'warn' : 'ok'}"><i class="bi bi-cash-coin"></i><div>
+        <strong>Custo da antecipação (cessão da Getnet): ~${U.pct(c.desagioPct)} do crédito</strong>
+        <p>Você antecipa praticamente toda a agenda de crédito. Comparando o que a Getnet apurou de líquido de crédito com o que efetivamente caiu na conta como antecipação (${U.fmtDate(c.bloco.de)}–${U.fmtDate(c.bloco.ate)}), o deságio fica na faixa de <strong>${U.pct(c.faixaMin)}–${U.pct(c.faixaMax)}</strong>. Sobre um volume de crédito de ~${U.brl(c.liqCredMes)}/mês, isso representa cerca de <strong>${U.brl(c.custoMensalEst)}/mês</strong> (${U.brl(c.custoMensalMin)}–${U.brl(c.custoMensalMax)}) — o preço de receber à vista em vez de esperar 30 dias. Vale comparar com o custo de um capital de giro equivalente.</p>
+      </div></div>`;
+    }
+
+    // composição por categoria
+    const cats = Object.values(A.porCat).sort((a, b) => b.total - a.total);
+    const rowsCat = cats.map(c => `<tr>
+      <td><strong>${U.esc(c.rotulo)}</strong></td>
+      <td class="mono right">${c.n}</td>
+      <td class="mono right ${['pix_recebido', 'getnet_debito', 'getnet_antecipacao', 'ifood_repasse', 'rendimento', 'outros_creditos'].includes(c.id) ? 'pos' : 'neg'}">${U.brl(c.total)}</td>
+    </tr>`).join('');
+
+    // tarifas detalhadas
+    const rowsTarifa = Object.values(A.tarifas.porTipo).sort((a, b) => b.total - a.total).map(t =>
+      `<tr><td>${U.esc(t.memo)}</td><td class="mono right">${t.n}x</td><td class="mono right neg">${U.brl(t.total)}</td><td class="mono right dim">${U.brl(t.total / dias * 30)}/mês</td></tr>`).join('');
+
+    // conciliação de boletos
+    let concCard = '';
+    if (A.conciliacaoBoletos) {
+      const cb = A.conciliacaoBoletos;
+      const rowsConc = cb.itens.slice(0, 30).map(r => `<tr>
+        <td class="mono">${U.fmtDate(r.boleto.venc)}</td>
+        <td>${U.esc(r.boleto.desc || '—')}</td>
+        <td class="mono right">${U.brl(r.boleto.valor)}</td>
+        <td>${r.banco ? '<span class="badge ok"><i class="bi bi-check2"></i> pago ' + U.fmtDate(r.banco.data) + '</span>' : r.naBorda ? '<span class="badge">fora da janela</span>' : '<span class="badge bad">não encontrado</span>'}</td>
+      </tr>`).join('');
+      concCard = card('Conferência de boletos — planilha × banco', `
+        <div class="kpi-grid kpi-grid-4" style="margin-bottom:12px">
+          ${kpiCard({ icon: 'bi-check-circle', label: 'Confirmados no banco', valor: String(cb.confirmados) })}
+          ${kpiCard({ icon: 'bi-dash-circle', label: 'Fora da janela', valor: String(cb.borda), sub: 'venceram na borda do extrato' })}
+          ${kpiCard({ icon: 'bi-exclamation-circle', label: 'Não encontrados', valor: String(cb.pendentes.length), cls: cb.pendentes.length ? 'kpi-warn' : '' })}
+        </div>
+        <div class="table-wrap"><table><thead><tr><th>Vencimento</th><th>Boleto (planilha)</th><th class="right">Valor</th><th>Status no banco</th></tr></thead><tbody>${rowsConc}</tbody></table></div>
+        <p class="note">Casa cada boleto da planilha (vencido no período do extrato) com o débito correspondente na conta, por valor e data (±5 dias). "Não encontrado" pode ser boleto pago em dinheiro, valor divergente, ou lançamento faltando.</p>`);
+    }
+
+    main.innerHTML = `
+      ${card('Banco · Conta Santander', uploader)}
+      ${kpis}
+      ${antecCard}
+      <div class="grid-2">
+        ${card('Para onde foi / de onde veio', '<div class="chart-box tall"><canvas id="ch-bn-cat"></canvas></div>')}
+        ${card('Recebimentos da maquininha na conta', `<div class="table-wrap"><table><tbody>
+          <tr><td>Antecipação de crédito (Getnet)</td><td class="mono right pos">${U.brl(A.antecipacaoTotal)}</td></tr>
+          <tr><td>Débito Getnet (D+1)</td><td class="mono right pos">${U.brl(A.getnetDebitoTotal)}</td></tr>
+          <tr><td>Repasse iFood</td><td class="mono right pos">${U.brl(A.ifoodRepasse)}</td></tr>
+          <tr><td>PIX recebidos</td><td class="mono right pos">${U.brl(A.porCat.pix_recebido?.total || 0)}</td></tr>
+          <tr><td>Rendimento da aplicação</td><td class="mono right pos">${U.brl(A.rendimento)}</td></tr>
+        </tbody></table></div><p class="note">É assim que o dinheiro da maquininha entra na conta: a maior parte via antecipação de crédito.</p>`)}
+      </div>
+      ${A.tarifas.total > 0 ? card('Tarifas bancárias detalhadas', `<div class="table-wrap"><table><thead><tr><th>Tarifa</th><th class="right">Qtd</th><th class="right">Total</th><th class="right">Projeção</th></tr></thead><tbody>${rowsTarifa}</tbody></table></div><p class="note">No período, as tarifas somaram ${U.brl(A.tarifas.total)} — ${A.tarifas.total < 200 ? 'valor baixo, conta bem negociada.' : 'vale revisar o pacote de serviços com o gerente.'}</p>`) : ''}
+      ${concCard}
+      ${card('Composição por categoria', `<div class="table-wrap"><table><thead><tr><th>Categoria</th><th class="right">Qtd</th><th class="right">Total</th></tr></thead><tbody>${rowsCat}</tbody></table></div>`)}`;
+
+    ligarUploadBanco();
+    if ($('#btn-banco-pub')) $('#btn-banco-pub').addEventListener('click', () => DB.banco.exportarJson(BANCO));
+    if ($('#btn-banco-clear')) $('#btn-banco-clear').addEventListener('click', () => {
+      if (confirm('Apagar o extrato bancário salvo neste navegador?')) { DB.banco.limpar(); BANCO = null; BAN = null; render(); }
+    });
+
+    const p = DB.charts.palette();
+    const catsCh = cats.slice(0, 8);
+    DB.charts.barrasHoriz('ch-bn-cat', catsCh.map(c => c.rotulo), catsCh.map(c => c.total), p.pistache);
+  }
+
+  function ligarUploadBanco() {
+    const btn = $('#btn-banco-up');
+    if (!btn) return;
+    let inp = $('#banco-file-input');
+    if (!inp) {
+      inp = document.createElement('input');
+      inp.type = 'file'; inp.accept = '.ofx'; inp.multiple = true; inp.hidden = true; inp.id = 'banco-file-input';
+      document.body.appendChild(inp);
+      inp.addEventListener('change', e => { if (e.target.files.length) processarOfx([...e.target.files]); inp.value = ''; });
     }
     btn.addEventListener('click', () => inp.click());
   }
