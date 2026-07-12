@@ -1802,6 +1802,31 @@
       analiseHtml = `<div class="rp-sec"><h3>Análise</h3><p>Em ${U.ymLabelFull(k)}, a Dubelato faturou ${U.brl(D.receitaBruta)} (${U.brl(m.vendasBalcao)} no balcão e ${U.brl(m.vendasIfood)} no iFood)${dRec != null ? ', ' + (dRec >= 0 ? 'alta' : 'queda') + ' de ' + pct(Math.abs(dRec)) + ' sobre o mês anterior' : ''}. O CMV consumiu ${pct(m.cmvPct)} da receita e a folha ${pct(m.folhaPct)}. O resultado operacional foi ${U.brl(D.resultadoOp)} (margem ${pct(D.margemOp)})${D.financ ? ', e após ' + U.brl(D.financ) + ' de financiamentos o mês fechou em ' + U.brl(D.resultadoFinal) + ' no caixa' : ''}.</p></div>`;
     }
 
+    // Realidade do caixa (banco) — só se houver extrato cobrindo o mês do relatório
+    let bancoHtml = '';
+    if (BAN && BAN.txs.length) {
+      const doMes = BAN.txs.filter(t => t.mes === k);
+      if (doMes.length >= 5) {
+        const ent = U.sum(doMes.filter(t => t.valor > 0), t => t.valor);
+        const sai = U.sum(doMes.filter(t => t.valor < 0), t => Math.abs(t.valor));
+        const tarifasMes = U.sum(doMes.filter(t => DB.banco.categoria(t.memo, t.valor) === 'tarifa'), t => Math.abs(t.valor));
+        const c = BAN.custoAntecipacao;
+        const linhas = [
+          `<tr><td>Entrou na conta</td><td class="rp-num">${U.brl(ent)}</td></tr>`,
+          `<tr><td>Saiu da conta</td><td class="rp-num">${U.brl(-sai)}</td></tr>`,
+          `<tr class="rp-sub"><td>= Movimento líquido do banco</td><td class="rp-num">${U.brl(ent - sai)}</td></tr>`,
+          `<tr><td>Tarifas bancárias no mês</td><td class="rp-num">${U.brl(-tarifasMes)}</td></tr>`,
+        ].join('');
+        const antecTexto = c
+          ? `<p>Recebemos as vendas de crédito por antecipação (à vista), em vez de esperar ~30 dias. Isso tem um custo estimado de <strong>${U.brl(c.custoMensalEst)}/mês</strong> (deságio de ${pct(c.desagioPct)} sobre o crédito) — o preço de ter o dinheiro na hora. Vale a pena enquanto for mais barato que um capital de giro; com o fim do financiamento Tortelli em novembro, dá para reavaliar.</p>`
+          : '';
+        bancoHtml = `<div class="rp-sec"><h3>Realidade do caixa (extrato bancário)</h3>
+          <table class="rp-tabela"><tbody>${linhas}</tbody></table>
+          ${antecTexto}
+          <p class="rp-nota">Valores efetivamente movimentados na conta Santander no mês — o que de fato caiu e saiu, além do resultado contábil da planilha.</p></div>`;
+      }
+    }
+
     const overlay = U.el(`<div id="report-overlay">
       <div class="rp-acoes no-print">
         <button class="side-btn" id="rp-print"><i class="bi bi-file-earmark-pdf"></i> Salvar em PDF</button>
@@ -1817,6 +1842,7 @@
         ${metasHtml}
         ${analiseHtml}
         <div class="rp-sec">${dreHtml}</div>
+        ${bancoHtml}
         <div class="rp-sec"><h3>Custos vs referência do setor</h3>${raioHtml}</div>
         <footer class="rp-foot">Dubelato BI — il gelato rende felici · documento gerado automaticamente a partir da planilha de controle</footer>
       </div>
