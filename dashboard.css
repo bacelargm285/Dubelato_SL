@@ -336,3 +336,4 @@ tr:hover td { background: var(--surface-2); }
 .antec-resumo > div { display: flex; flex-direction: column; gap: 2px; }
 .antec-resumo strong { font-size: 16px; font-variant-numeric: tabular-nums; }
 .antec-resumo strong.neg { color: var(--neg); }
+.dim-row td { opacity: .6; }

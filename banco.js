@@ -186,6 +186,49 @@ DB.banco = (function () {
       }
     }
 
+    // CUSTO DA ANTECIPAÇÃO MÊS A MÊS. A antecipação de uma venda cai D+1/D+2,
+    // então casamos pela DATA DE RECEBIMENTO: para cada mês, o líquido de
+    // crédito vendido é comparado com o que foi antecipado referente àquele
+    // mês. Só é confiável quando as DUAS fontes cobrem o mês inteiro; meses
+    // com cobertura parcial são marcados e não entram no total.
+    A.antecipacaoMensal = [];
+    if (getnet && getnet.cartoes && getnet.cartoes.length && A.antecipacaoTotal > 0) {
+      const cred = getnet.cartoes.filter(c => c.modalidade === 'Crédito');
+      const cobertura = itens => {
+        const porMes = {};
+        for (const it of itens) {
+          const k = U.ymKey(it.data), d = it.data.getDate();
+          const c = porMes[k] || (porMes[k] = { min: 31, max: 1 });
+          c.min = Math.min(c.min, d); c.max = Math.max(c.max, d);
+        }
+        return porMes;
+      };
+      const covV = cobertura(cred), covA = cobertura(A.antecipacoes);
+      const liqPorMes = {}, antPorMes = {};
+      for (const c of cred) liqPorMes[U.ymKey(c.data)] = (liqPorMes[U.ymKey(c.data)] || 0) + c.liquido;
+      // antecipação atribuída ao mês da venda: recua 1 dia (aproxima D+1) antes de agrupar
+      for (const t of A.antecipacoes) {
+        const dv = new Date(t.data); dv.setDate(dv.getDate() - 1);
+        antPorMes[U.ymKey(dv)] = (antPorMes[U.ymKey(dv)] || 0) + t.valor;
+      }
+      const meses = [...new Set([...Object.keys(liqPorMes), ...Object.keys(antPorMes)])].sort();
+      for (const k of meses) {
+        const [y, mo] = k.split('-').map(Number);
+        const diasNoMes = new Date(y, mo, 0).getDate();
+        const cv = covV[k], ca = covA[k];
+        // mês válido: as duas fontes começam até dia 3 e terminam até 3 dias do fim
+        const vOk = cv && cv.min <= 3 && cv.max >= diasNoMes - 3;
+        const aOk = ca && ca.min <= 4 && ca.max >= diasNoMes - 4;
+        const liq = liqPorMes[k] || 0, ant = antPorMes[k] || 0;
+        A.antecipacaoMensal.push({
+          mes: k, liquidoSemAntecipacao: liq, recebidoComAntecipacao: ant,
+          custo: liq - ant, desagioPct: liq ? (1 - ant / liq) * 100 : null,
+          completo: !!(vOk && aOk),
+        });
+      }
+      A.antecMesesCompletos = A.antecipacaoMensal.filter(m => m.completo);
+    }
+
     // conciliação de boletos: planilha (vencidos na janela) × débitos de boleto no banco
     // boletos vencendo até 5 dias após o INÍCIO do extrato podem ter sido pagos
     // antes da janela — marcados como "borda", não como pendência real.

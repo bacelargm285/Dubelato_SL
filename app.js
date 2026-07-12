@@ -194,7 +194,7 @@
       const fn = {
         dashboard: viewDashboard, dre: viewDRE, fluxo: viewFluxo, entradas: () => viewLancamentos('Entrada'),
         saidas: viewSaidas, boletos: viewBoletos, estoque: viewEstoque,
-        ifood: viewIfood, funcionarios: viewFuncionarios, marketing: viewMarketing, cubas: viewCubas, getnet: viewGetnet, banco: viewBanco, producao: viewProducao, nutricional: viewNutricional,
+        ifood: viewIfood, funcionarios: viewFuncionarios, marketing: viewMarketing, cubas: viewCubas, getnet: viewGetnet, banco: viewBanco, antecipacao: viewAntecipacao, producao: viewProducao, nutricional: viewNutricional,
         comparativos: viewComparativos, clima: viewClima, consultoria: viewConsultoria, alertas: viewAlertas, config: viewConfig,
       }[viewAtual] || viewDashboard;
       main.innerHTML = '';
@@ -1265,32 +1265,14 @@
       ${kpiCard({ icon: 'bi-percent', label: 'Tarifas bancárias', valor: U.brl(A.tarifas.total), sub: 'no período · ' + dias + ' dias', invert: true })}
     </div>`;
 
-    // custo da antecipação — comparação visual Getnet (sem antecipar) × OFX (antecipado)
+    // custo da antecipação — resumo (detalhe completo na aba Antecipação)
     let antecCard = '';
     if (A.custoAntecipacao) {
       const c = A.custoAntecipacao;
-      const max = Math.max(c.brutoCredito, c.liquidoSemAntecipacao, c.recebidoComAntecipacao) || 1;
-      const w = v => (v / max * 100).toFixed(1);
-      const barra = (rotulo, valor, sub, cor, extra = '') => `
-        <div class="antec-row">
-          <div class="antec-lbl">${rotulo}<span class="dim">${sub}</span></div>
-          <div class="antec-track"><div class="antec-fill" style="width:${w(valor)}%;background:${cor}"></div>
-            <span class="antec-val">${U.brl(valor)}</span></div>
-          ${extra}
-        </div>`;
-      antecCard = card('Antecipação de crédito — Getnet × conta bancária', `
-        <p class="note" style="margin-top:0">Você antecipa quase toda a agenda de crédito, então o dinheiro entra pela conta (OFX) e não pela agenda da Getnet. Veja o que a antecipação custa: partindo das <strong>vendas de crédito da maquininha</strong> (${U.fmtDate(c.bloco.de)}–${U.fmtDate(c.bloco.ate)}), quanto você <em>receberia</em> esperando 30 dias vs. quanto <em>recebeu à vista</em>.</p>
-        <div class="antec-comp">
-          ${barra('Vendas de crédito (bruto)', c.brutoCredito, 'valor cheio das vendas no crédito', 'var(--tx-3)')}
-          ${barra('Sem antecipar — receberia em ~30 dias', c.liquidoSemAntecipacao, 'já sem a taxa normal da maquininha', 'var(--teal)')}
-          ${barra('Antecipando — recebeu à vista (caiu na conta)', c.recebidoComAntecipacao, 'valor que entrou pelo banco', 'var(--gold)')}
-        </div>
-        <div class="antec-resumo">
-          <div><span class="dim">Custo da antecipação no período</span><strong class="neg">− ${U.brl(c.custoNoPeriodo)}</strong></div>
-          <div><span class="dim">Deságio sobre o crédito</span><strong>${U.pct(c.desagioPct)} <span class="dim">(faixa ${U.pct(c.faixaMin)}–${U.pct(c.faixaMax)})</span></strong></div>
-          <div><span class="dim">Projeção mensal</span><strong class="neg">~ ${U.brl(c.custoMensalEst)}/mês</strong></div>
-        </div>
-        <p class="note">Ou seja: a diferença entre a barra verde e a dourada é o preço de não esperar. No mês, isso equivale a ~${U.brl(c.custoMensalEst)}. Faz sentido enquanto esse custo for menor que o de um capital de giro no mesmo valor — quando a parcela do Tortelli sair (novembro), vale reavaliar se ainda precisa antecipar tudo.</p>`);
+      antecCard = `<div class="alerta ${c.desagioPct > 2 ? 'warn' : 'ok'}"><i class="bi bi-cash-coin"></i><div>
+        <strong>Antecipação de crédito custa ~${U.pct(c.desagioPct)} (≈ ${U.brl(c.custoMensalEst)}/mês)</strong>
+        <p>Você recebeu ${U.brl(c.recebidoComAntecipacao)} à vista pela antecipação; sem antecipar, receberia ${U.brl(c.liquidoSemAntecipacao)} em ~30 dias — diferença de ${U.brl(c.custoNoPeriodo)} no período. A comparação visual e o custo mês a mês estão na aba <strong>Antecipação</strong>.</p>
+      </div></div>`;
     }
 
     // composição por categoria
@@ -1849,6 +1831,83 @@
     const o = document.getElementById('report-overlay');
     if (o) o.remove();
     document.body.classList.remove('report-open');
+  }
+
+  function viewAntecipacao(main) {
+    if (!BAN || !BAN.custoAntecipacao) {
+      const falta = !BANCO ? 'o extrato bancário (aba Banco)' : !GETNET ? 'os dados da Getnet (aba Getnet)' : 'dados suficientes';
+      main.innerHTML = card('Custo da antecipação', `<p class="note">Esta análise cruza o que a Getnet apurou de crédito com o que caiu na conta pela antecipação. Falta carregar ${falta} para calcular. Assim que as duas fontes cobrirem o mesmo período, o custo mês a mês aparece aqui.</p>`);
+      return;
+    }
+    const A = BAN, c = A.custoAntecipacao;
+
+    // card comparativo (período de sobreposição)
+    const max = Math.max(c.brutoCredito, c.liquidoSemAntecipacao, c.recebidoComAntecipacao) || 1;
+    const w = v => (v / max * 100).toFixed(1);
+    const barra = (rotulo, valor, sub, cor) => `
+      <div class="antec-row"><div class="antec-lbl">${rotulo}<span class="dim">${sub}</span></div>
+        <div class="antec-track"><div class="antec-fill" style="width:${w(valor)}%;background:${cor}"></div>
+          <span class="antec-val">${U.brl(valor)}</span></div></div>`;
+
+    // histórico mensal
+    const completos = A.antecMesesCompletos || [];
+    const custoMedioMes = completos.length ? U.avg(completos.map(m => m.custo)) : c.custoMensalEst;
+    let histHtml;
+    if (completos.length) {
+      const rows = completos.map(m => `<tr>
+        <td><strong>${U.ymLabelFull(m.mes)}</strong></td>
+        <td class="mono right">${U.brl(m.liquidoSemAntecipacao)}</td>
+        <td class="mono right">${U.brl(m.recebidoComAntecipacao)}</td>
+        <td class="mono right neg"><strong>${U.brl(m.custo)}</strong></td>
+        <td class="mono right">${U.pct(m.desagioPct)}</td>
+      </tr>`).join('');
+      histHtml = `<div class="table-wrap"><table>
+        <thead><tr><th>Mês</th><th class="right">Sem antecipar</th><th class="right">Recebido à vista</th><th class="right">Custo</th><th class="right">Deságio</th></tr></thead>
+        <tbody>${rows}</tbody></table></div>
+        <div class="chart-box" style="margin-top:14px"><canvas id="ch-antec-mes"></canvas></div>`;
+    } else {
+      // ainda não há mês fechado nas duas fontes — mostra os parciais com aviso
+      const rows = A.antecipacaoMensal.map(m => `<tr class="${m.completo ? '' : 'dim-row'}">
+        <td><strong>${U.ymLabel(m.mes)}</strong> ${m.completo ? '' : '<span class="chip">cobertura parcial</span>'}</td>
+        <td class="mono right">${U.brl(m.liquidoSemAntecipacao)}</td>
+        <td class="mono right">${m.recebidoComAntecipacao > 0 ? U.brl(m.recebidoComAntecipacao) : '<span class="dim">sem extrato</span>'}</td>
+        <td class="mono right ${m.completo ? 'neg' : 'dim'}">${m.recebidoComAntecipacao > 0 ? U.brl(m.custo) : '—'}</td>
+      </tr>`).join('');
+      histHtml = `<div class="alerta warn"><i class="bi bi-info-circle"></i><div>
+        <strong>Ainda não há um mês fechado com as duas fontes</strong>
+        <p>Para o custo mensal ser exato, preciso da Getnet <em>e</em> do extrato bancário cobrindo o mesmo mês inteiro. Hoje o extrato começa em ${U.fmtDate(A.ini)}, então junho e julho estão parciais. Assim que você trouxer um OFX de um mês fechado (ex.: agosto inteiro) junto do relatório Getnet do mesmo mês, a tabela abaixo passa a mostrar o valor exato por mês.</p></div></div>
+        <div class="table-wrap"><table>
+        <thead><tr><th>Mês</th><th class="right">Crédito vendido (Getnet)</th><th class="right">Antecipado (OFX)</th><th class="right">Custo</th></tr></thead>
+        <tbody>${rows}</tbody></table></div>
+        <p class="note">Enquanto não há mês fechado, a melhor estimativa vem da sobreposição atual: <strong>~${U.brl(c.custoMensalEst)}/mês</strong> (${U.pct(c.desagioPct)} de deságio).</p>`;
+    }
+
+    main.innerHTML = `
+      <div class="kpi-grid kpi-grid-4">
+        ${kpiCard({ icon: 'bi-cash-coin', label: 'Custo médio por mês', valor: U.brl(custoMedioMes), sub: completos.length ? completos.length + ' meses fechados' : 'estimativa', invert: true, cls: 'kpi-warn' })}
+        ${kpiCard({ icon: 'bi-percent', label: 'Deságio do crédito', valor: U.pct(c.desagioPct), sub: 'faixa ' + U.pct(c.faixaMin) + '–' + U.pct(c.faixaMax) })}
+        ${kpiCard({ icon: 'bi-graph-down-arrow', label: 'Custo projetado no ano', valor: U.brl(custoMedioMes * 12), invert: true })}
+        ${kpiCard({ icon: 'bi-credit-card-2-front', label: 'Crédito antecipado/mês', valor: U.brl(c.liqCredMes) })}
+      </div>
+      ${card('Sem antecipar × antecipando — período de ' + U.fmtDate(c.bloco.de) + ' a ' + U.fmtDate(c.bloco.ate), `
+        <div class="antec-comp">
+          ${barra('Vendas de crédito (bruto)', c.brutoCredito, 'valor cheio no crédito', 'var(--tx-3)')}
+          ${barra('Sem antecipar — receberia em ~30 dias', c.liquidoSemAntecipacao, 'já sem a taxa da maquininha', 'var(--teal)')}
+          ${barra('Antecipando — recebeu à vista', c.recebidoComAntecipacao, 'entrou pela conta', 'var(--gold)')}
+        </div>
+        <div class="antec-resumo">
+          <div><span class="dim">Diferença no período</span><strong class="neg">− ${U.brl(c.custoNoPeriodo)}</strong></div>
+          <div><span class="dim">Deságio</span><strong>${U.pct(c.desagioPct)}</strong></div>
+        </div>`)}
+      ${card('Quanto a antecipação custa por mês', histHtml)}
+      ${card('O que fazer com isso', `<p class="note">A antecipação faz sentido enquanto o custo (${U.pct(c.desagioPct)} ao mês sobre o crédito) for menor que o de um capital de giro equivalente ou que a falta de caixa custaria em juros/atrasos. Com a parcela do Tortelli terminando em novembro, o caixa alivia ~R$ 13 mil/mês — momento ideal para testar segurar parte da agenda em vez de antecipar 100% e economizar esse deságio. Cada 25% da agenda que você deixar de antecipar economiza ~${U.brl(custoMedioMes * 0.25)}/mês.</p>`)}`;
+
+    if (completos.length) {
+      const p = DB.charts.palette();
+      DB.charts.barras('ch-antec-mes', completos.map(m => U.ymLabel(m.mes)), [
+        { label: 'Custo da antecipação', data: completos.map(m => m.custo), color: p.amarena },
+      ], { unidades: false });
+    }
   }
 
   function viewConsultoria(main) {
