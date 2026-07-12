@@ -339,6 +339,20 @@ DB.getnet = (function () {
         A.cruzamento.push({ mes: k, planilha: m.vendasBalcao, getnet, diferenca: m.vendasBalcao - getnet, parcial });
       }
     }
+    // proporção das formas de pagamento (para projetar entrada de caixa diária)
+    const credB = U.sum(d.cartoes.filter(c => c.modalidade === 'Crédito'), c => c.bruto);
+    const debB = U.sum(d.cartoes.filter(c => c.modalidade === 'Débito'), c => c.bruto);
+    const pixB = U.sum(d.pix || [], p => p.bruto);
+    const totCP = credB + debB + pixB || 1;
+    A.mix = {
+      credito: credB / totCP,
+      debito: debB / totCP,
+      pix: pixB / totCP,
+      // taxa média efetiva por modalidade (para converter venda bruta em líquido que cai na conta)
+      taxaCredito: credB ? U.sum(d.cartoes.filter(c => c.modalidade === 'Crédito'), c => c.taxa) / credB : 0.014,
+      taxaDebito: debB ? U.sum(d.cartoes.filter(c => c.modalidade === 'Débito'), c => c.taxa) / debB : 0.009,
+    };
+
     return A;
   }
 

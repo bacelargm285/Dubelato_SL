@@ -395,6 +395,22 @@
     DB.charts.linhaProjecao('ch-proj', labelsReal, real, labelsProj, vals);
   }
 
+  // venda média por dia da semana dos últimos ~60 dias de lançamentos (fallback do fluxo)
+  function vendaMediaDiaSemana(dow) {
+    if (!M || !M.txs) return 0;
+    const lim = new Date(); lim.setDate(lim.getDate() - 60);
+    const porDia = {};
+    for (const t of M.txs) {
+      if (t.tipo !== 'Entrada' || (t.grupo !== 'receitaBalcao' && t.grupo !== 'receitaIfood')) continue;
+      if (t.date < lim) continue;
+      const k = t.date.toDateString();
+      porDia[k] = porDia[k] || { dow: t.date.getDay(), v: 0 };
+      porDia[k].v += t.valor;
+    }
+    const doDia = Object.values(porDia).filter(d => d.dow === dow);
+    return doDia.length ? U.avg(doDia.map(d => d.v)) : 0;
+  }
+
   function viewFluxoReal(main) {
     const A = BAN;
     const serie = A.saldoDiario;
@@ -411,11 +427,44 @@
     const eventos = [];
     if (M.boletos) for (const b of M.boletos) if (b.venc && b.venc > hoje) eventos.push({ data: b.venc, valor: -b.valor, tipo: 'boleto', desc: b.desc });
     if (GAN && GAN.recebiveis) for (const r of GAN.recebiveis) if (r.venc && r.venc > hoje) eventos.push({ data: r.venc, valor: r.valor, tipo: 'receb', desc: r.bandeira });
+
+    // ENTRADA DE CAIXA DIÁRIA (loja abre todo dia): débito cai em D+1, PIX e
+    // dinheiro entram na hora. Crédito NÃO entra aqui (já vem pelos recebíveis
+    // da agenda Getnet, para não contar em dobro). Estima a venda de cada dia
+    // pela previsão (clima × calendário) ou, sem ela, pela média recente, e
+    // quebra na proporção real das formas de pagamento.
+    const mix = GAN && GAN.mix ? GAN.mix : { debito: 0.40, pix: 0.12, taxaDebito: 0.009 };
+    const dinheiroPct = 0.119; // ~12% do balcão é dinheiro (planilha vs maquininha)
+    // fração da venda total que entra no caixa dia a dia (fora o crédito):
+    // participação de débito+pix dentro de cartão/pix, mais o dinheiro do balcão
+    function vendaPrevistaDoDia(dia) {
+      if (CLIMA && CLIMA.previsaoDemanda) {
+        const p = CLIMA.previsaoDemanda.find(x => x.data.getFullYear() === dia.getFullYear() && x.data.getMonth() === dia.getMonth() && x.data.getDate() === dia.getDate());
+        if (p) return p.estimativa;
+        if (CLIMA.analise) { // além dos 7 dias previstos, usa o modelo base
+          const A2 = CLIMA.analise;
+          const fx = DB.clima.faixaDe ? null : null;
+          return A2.nivelAtual * (A2.fatorDow[dia.getDay()] || 1);
+        }
+      }
+      // fallback: venda média por dia da semana dos últimos 60 dias de lançamentos
+      return vendaMediaDiaSemana(dia.getDay());
+    }
     const projSerie = [];
     let saldoP = saldoHoje;
+    let entradaVendaTotal = 0;
     for (let d = 1; d <= horizonte; d++) {
       const dia = new Date(hoje); dia.setDate(dia.getDate() + d);
-      saldoP += netDia;
+      const venda = vendaPrevistaDoDia(dia) || 0;
+      // débito líquido (D+1: usa a venda do dia anterior) + PIX e dinheiro (hoje)
+      const ontem = new Date(dia); ontem.setDate(ontem.getDate() - 1);
+      const vendaOntem = vendaPrevistaDoDia(ontem) || 0;
+      const entradaDebito = vendaOntem * mix.debito * (1 - (mix.taxaDebito || 0.009));
+      const entradaPix = venda * mix.pix;
+      const entradaDinheiro = venda * dinheiroPct;
+      const entradaDia = entradaDebito + entradaPix + entradaDinheiro;
+      entradaVendaTotal += entradaDia;
+      saldoP += entradaDia;
       for (const e of eventos) if (e.data.getFullYear() === dia.getFullYear() && e.data.getMonth() === dia.getMonth() && e.data.getDate() === dia.getDate()) saldoP += e.valor;
       projSerie.push({ data: dia, saldo: saldoP });
     }
@@ -424,18 +473,20 @@
     const totalReceb = U.sum(eventos.filter(e => e.tipo === 'receb'), e => e.valor);
 
     const status = primeiroNeg
-      ? `<div class="alerta bad"><i class="bi bi-exclamation-octagon"></i><div><strong>Atenção ao caixa</strong><p>Considerando saldo atual, boletos a vencer e recebíveis já agendados, a conta pode ficar negativa por volta de ${U.fmtDate(primeiroNeg.data)}. Vale antecipar recebível, negociar prazo de boleto ou segurar despesa.</p></div></div>`
-      : `<div class="alerta ok"><i class="bi bi-check-circle"></i><div><strong>Caixa projetado positivo</strong><p>Com o saldo atual mais o que já está agendado, a conta se mantém positiva nos próximos 90 dias.</p></div></div>`;
+      ? `<div class="alerta bad"><i class="bi bi-exclamation-octagon"></i><div><strong>Atenção ao caixa</strong><p>Considerando saldo atual, a venda diária estimada, boletos a vencer e recebíveis já agendados, a conta pode ficar negativa por volta de ${U.fmtDate(primeiroNeg.data)}. Vale antecipar recebível, negociar prazo de boleto ou segurar despesa.</p></div></div>`
+      : `<div class="alerta ok"><i class="bi bi-check-circle"></i><div><strong>Caixa projetado positivo</strong><p>Com o saldo atual, a venda diária estimada e o que já está agendado, a conta se mantém positiva nos próximos 90 dias.</p></div></div>`;
+    const temPrevisao = !!(CLIMA && CLIMA.previsaoDemanda);
 
     main.innerHTML = `
       <div class="kpi-grid kpi-grid-4">
         ${kpiCard({ icon: 'bi-safe2', label: A.saldoExato ? 'Saldo real na conta' : 'Saldo (movimento acumulado)', valor: U.brl(saldoHoje), sub: A.saldoExato ? 'em ' + U.fmtDate(dataSaldo) + ' (extrato)' : 'reimporte o OFX para o saldo exato' })}
-        ${kpiCard({ icon: 'bi-graph-down', label: 'Menor saldo do período', valor: U.brl(saldoMin), sub: diaMin ? U.fmtDate(diaMin.data) : '', cls: saldoMin < 1000 ? 'kpi-warn' : '' })}
-        ${kpiCard({ icon: 'bi-arrow-left-right', label: 'Fluxo líquido / dia', valor: U.brl(netDia), sub: 'média do extrato', cls: netDia < 0 ? 'kpi-bad' : '' })}
-        ${kpiCard({ icon: 'bi-calendar-check', label: 'Já agendado (90d)', valor: U.brl(totalReceb - totalBoletos), sub: U.brl(totalReceb) + ' a receber · ' + U.brl(totalBoletos) + ' boletos' })}
+        ${kpiCard({ icon: 'bi-graph-down', label: 'Menor saldo projetado', valor: U.brl(Math.min(saldoMin, ...projSerie.map(s => s.saldo))), cls: Math.min(...projSerie.map(s => s.saldo)) < 1000 ? 'kpi-warn' : '' })}
+        ${kpiCard({ icon: 'bi-cash-stack', label: 'Entrada de venda (90d)', valor: U.brl(entradaVendaTotal), sub: 'débito + PIX + dinheiro estimados' })}
+        ${kpiCard({ icon: 'bi-calendar-check', label: 'Já agendado (90d)', valor: U.brl(totalReceb - totalBoletos), sub: U.brl(totalReceb) + ' receb. · ' + U.brl(totalBoletos) + ' boletos' })}
       </div>
-      ${card('Saldo real na conta × projeção dos próximos 90 dias', '<div class="chart-box tall"><canvas id="ch-fluxo-real"></canvas></div><p class="note">A linha cheia é o saldo que <strong>de fato</strong> esteve na conta (extrato Santander). A pontilhada projeta a partir de hoje, somando ao saldo atual os boletos que vencem e os recebíveis já agendados na Getnet, mais o fluxo médio diário observado.</p>')}
+      ${card('Saldo real na conta × projeção dos próximos 90 dias', '<div class="chart-box tall"><canvas id="ch-fluxo-real"></canvas></div><p class="note">A linha cheia é o saldo que <strong>de fato</strong> esteve na conta (extrato Santander). A pontilhada projeta a partir de hoje somando, a cada dia: a <strong>venda estimada em débito (D+1), PIX e dinheiro</strong>' + (temPrevisao ? ' pela previsão de vendas (clima × calendário)' : ' pela média por dia da semana') + ', os recebíveis de crédito já agendados na Getnet, e os boletos que vencem.</p>')}
       ${status}
+      ${!temPrevisao ? '<div class="alerta warn"><i class="bi bi-lightbulb"></i><div><strong>Dica: melhore a precisão</strong><p>Abra a aba <strong>Clima × Vendas</strong> e clique em carregar a análise. Com ela, a projeção de venda diária passa a considerar temperatura, feriados e férias — bem mais precisa que a média simples usada agora.</p></div></div>' : ''}
       ${card('O que já está agendado para os próximos 90 dias', (() => {
         const evOrd = eventos.filter(e => e.data <= projSerie[projSerie.length - 1].data).sort((a, b) => a.data - b.data).slice(0, 25);
         if (!evOrd.length) return '<p class="note">Sem boletos ou recebíveis agendados no período.</p>';
@@ -446,7 +497,7 @@
         </tr>`).join('');
         return `<div class="table-wrap"><table><thead><tr><th>Data</th><th>Compromisso</th><th class="right">Valor</th></tr></thead><tbody>${rows}</tbody></table></div>`;
       })())}
-      ${card('Como este fluxo é calculado', `<p class="note">Diferente da projeção por média, este fluxo parte do <strong>saldo real</strong> do seu extrato (${U.brl(saldoHoje)} em ${U.fmtDate(dataSaldo)}) e reconstrói quanto esteve na conta a cada dia. A projeção para frente usa esse saldo como ponto de partida e soma o que você <em>já sabe</em> que vai entrar (recebíveis Getnet) e sair (boletos da planilha).</p>`)}`;
+      ${card('Como este fluxo é calculado', `<p class="note">Parte do <strong>saldo real</strong> do extrato (${U.brl(saldoHoje)} em ${U.fmtDate(dataSaldo)}) e reconstrói quanto esteve na conta a cada dia. Para frente, todo dia soma a <strong>venda estimada que entra no caixa</strong> — débito (cai em D+1), PIX (na hora) e dinheiro (~12% do balcão) — mais os recebíveis de crédito da agenda Getnet (o crédito não é contado duas vezes) e menos os boletos. Proporções medidas nos seus dados: débito ${U.pct(mix.debito * 100)}, PIX ${U.pct(mix.pix * 100)} do que passa na maquininha.</p>`)}`;
 
     const p = DB.charts.palette();
     const passoR = Math.max(1, Math.floor(serie.length / 30));
