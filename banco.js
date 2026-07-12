@@ -40,6 +40,12 @@ DB.banco = (function () {
         tipo: valor >= 0 ? 'credito' : 'debito',
       });
     }
+    // saldo da conta (LEDGERBAL): âncora do fluxo de caixa real
+    const bal = txt.match(/<LEDGERBAL>[\s\S]*?<BALAMT>([^\r\n<]+)[\s\S]*?<DTASOF>(\d{8})/);
+    if (bal) {
+      const v = U.toNum(bal[1]), d = bal[2];
+      txs._saldo = { valor: v, data: new Date(+d.slice(0, 4), +d.slice(4, 6) - 1, +d.slice(6, 8)) };
+    }
     return txs;
   }
 
@@ -74,7 +80,10 @@ DB.banco = (function () {
   function carregar() {
     try {
       const d = JSON.parse(localStorage.getItem(LS_KEY) || 'null');
-      return d ? { txs: d.txs.map(rev), atualizadoEm: d.atualizadoEm ? new Date(d.atualizadoEm) : null } : null;
+      if (!d) return null;
+      const out = { txs: d.txs.map(rev), atualizadoEm: d.atualizadoEm ? new Date(d.atualizadoEm) : null };
+      if (d.saldo) out.saldo = { valor: d.saldo.valor, data: new Date(d.saldo.data) };
+      return out;
     } catch { return null; }
   }
   function salvar(dados) { try { localStorage.setItem(LS_KEY, JSON.stringify(dados)); } catch { /* cheio */ } }
@@ -83,7 +92,11 @@ DB.banco = (function () {
   function mesclar(atual, novosTxs) {
     const mapa = new Map((atual?.txs || []).map(t => [t.fitid, t]));
     for (const t of novosTxs) mapa.set(t.fitid, t);           // FITID é único por lançamento
-    return { txs: [...mapa.values()].sort((a, b) => a.data - b.data), atualizadoEm: new Date() };
+    const out = { txs: [...mapa.values()].sort((a, b) => a.data - b.data), atualizadoEm: new Date() };
+    // mantém o saldo mais recente (o do extrato com data mais nova)
+    const candidatos = [atual?.saldo, novosTxs._saldo].filter(Boolean);
+    if (candidatos.length) out.saldo = candidatos.reduce((a, b) => (b.data > a.data ? b : a));
+    return out;
   }
 
   function exportarJson(dados) {
@@ -100,7 +113,9 @@ DB.banco = (function () {
       const res = await fetch(ARQUIVO_PUBLICO, { cache: 'no-store' });
       if (!res.ok) return null;
       const d = await res.json();
-      return { txs: d.txs.map(rev), atualizadoEm: d.atualizadoEm ? new Date(d.atualizadoEm) : null };
+      const out = { txs: d.txs.map(rev), atualizadoEm: d.atualizadoEm ? new Date(d.atualizadoEm) : null };
+      if (d.saldo) out.saldo = { valor: d.saldo.valor, data: new Date(d.saldo.data) };
+      return out;
     } catch { return null; }
   }
 
@@ -126,6 +141,33 @@ DB.banco = (function () {
       m.n++;
     }
     A.meses = Object.keys(A.porMes).sort();
+
+    // ---- FLUXO DE CAIXA REAL: saldo diário reconstruído a partir do saldo
+    // final informado no OFX (LEDGERBAL), voltando no tempo lançamento a
+    // lançamento. É o dinheiro que REALMENTE esteve na conta em cada dia. ----
+    if (dados.saldo) {
+      const saldoFim = dados.saldo.valor, dataSaldo = dados.saldo.data;
+      // saldo ao fim de cada dia: parte do saldo do OFX e desconta o que veio depois
+      const ordenadas = txs.slice().sort((a, b) => a.data - b.data);
+      const porDia = {};
+      for (const t of ordenadas) {
+        const k = t.data.getFullYear() + '-' + String(t.data.getMonth() + 1).padStart(2, '0') + '-' + String(t.data.getDate()).padStart(2, '0');
+        porDia[k] = (porDia[k] || 0) + t.valor;
+      }
+      const diasK = Object.keys(porDia).sort();
+      // reconstrói: saldo no fim do último dia = saldoFim; recua acumulando
+      const serie = [];
+      let saldo = saldoFim;
+      // soma dos lançamentos após a data do saldo (normalmente zero)
+      for (let i = diasK.length - 1; i >= 0; i--) {
+        const dia = new Date(diasK[i] + 'T12:00:00');
+        serie.unshift({ data: dia, saldo });
+        saldo -= porDia[diasK[i]]; // saldo do fim do dia anterior
+      }
+      A.saldoDiario = serie;
+      A.saldoAtual = saldoFim;
+      A.saldoData = dataSaldo;
+    }
     A.porCat = {};
     for (const t of txs) {
       const c = A.porCat[t.cat] || (A.porCat[t.cat] = { id: t.cat, rotulo: ROTULOS[t.cat], total: 0, n: 0, itens: [] });

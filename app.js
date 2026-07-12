@@ -362,21 +362,25 @@
   }
 
   function viewFluxo(main) {
+    // Se há extrato bancário, o fluxo é REAL (saldo do banco); senão, projeção da planilha
+    const temBanco = BAN && BAN.saldoDiario && BAN.saldoDiario.length >= 5;
+    if (temBanco) return viewFluxoReal(main);
+
     const k = M.kpi, proj = M.proj;
     const status = proj.primeiroNegativo != null
       ? `<div class="alerta bad"><i class="bi bi-exclamation-octagon"></i><div><strong>Déficit projetado</strong><p>No ritmo atual, o caixa fica negativo em ~${proj.primeiroNegativo} dias.</p></div></div>`
       : `<div class="alerta ok"><i class="bi bi-check-circle"></i><div><strong>Caixa saudável</strong><p>Sem déficit projetado nos próximos 90 dias.</p></div></div>`;
 
     main.innerHTML = `
+      <div class="alerta warn"><i class="bi bi-info-circle"></i><div><strong>Fluxo estimado pela planilha</strong><p>Carregue o extrato bancário (aba <strong>Banco</strong>) para ver o fluxo de caixa <em>real</em> — o saldo que de fato esteve na conta, dia a dia, em vez da projeção por média.</p></div></div>
       <div class="kpi-grid kpi-grid-4">
         ${kpiCard({ icon: 'bi-arrow-down-circle', label: 'Entrada média / dia (30d)', valor: U.brl(proj.entDia) })}
         ${kpiCard({ icon: 'bi-arrow-up-circle', label: 'Saída média / dia (30d)', valor: U.brl(proj.saiDia) })}
         ${kpiCard({ icon: 'bi-water', label: 'Fluxo líquido / dia', valor: U.brl(proj.netDia), cls: proj.netDia < 0 ? 'kpi-bad' : '' })}
-        ${kpiCard({ icon: 'bi-safe', label: 'Saldo atual', valor: U.brl(k.saldoAtual) })}
+        ${kpiCard({ icon: 'bi-safe', label: 'Saldo estimado', valor: U.brl(k.saldoAtual) })}
       </div>
-      ${card('Fluxo realizado × projetado (90 dias)', '<div class="chart-box tall"><canvas id="ch-proj"></canvas></div>' , { right: status ? '' : '' })}
-      ${status}
-      ${card('Como a projeção é calculada', `<p class="note">A projeção usa a média diária de entradas e saídas dos últimos 30 dias de lançamentos e avança o saldo dia a dia por 90 dias. Os boletos futuros aparecem na aba <strong>Boletos</strong> e já tendem a estar refletidos na média de saídas quando pagos regularmente. Meses incompletos são comparados por ritmo diário, não pelo total.</p>`)}`;
+      ${card('Fluxo realizado × projetado (90 dias)', '<div class="chart-box tall"><canvas id="ch-proj"></canvas></div>')}
+      ${status}`;
 
     const labelsReal = M.meses.map(U.ymLabel);
     const real = M.meses.map(x => M.byMonth[x].saldoAcumulado);
@@ -387,6 +391,69 @@
       vals.push(proj.serie[i].saldo);
     }
     DB.charts.linhaProjecao('ch-proj', labelsReal, real, labelsProj, vals);
+  }
+
+  function viewFluxoReal(main) {
+    const A = BAN;
+    const serie = A.saldoDiario;
+    const saldoHoje = A.saldoAtual;
+    const dataSaldo = A.saldoData;
+    const saldos = serie.map(s => s.saldo);
+    const saldoMin = Math.min(...saldos);
+    const diaMin = serie.find(s => s.saldo === saldoMin);
+    const dias = Math.round((A.fim - A.ini) / 86400000) + 1;
+    const entDia = A.entradas / dias, saiDia = A.saidas / dias, netDia = entDia - saiDia;
+
+    const hoje = new Date(Math.max(+dataSaldo, +A.fim));
+    const horizonte = 90;
+    const eventos = [];
+    if (M.boletos) for (const b of M.boletos) if (b.venc && b.venc > hoje) eventos.push({ data: b.venc, valor: -b.valor, tipo: 'boleto', desc: b.desc });
+    if (GAN && GAN.recebiveis) for (const r of GAN.recebiveis) if (r.venc && r.venc > hoje) eventos.push({ data: r.venc, valor: r.valor, tipo: 'receb', desc: r.bandeira });
+    const projSerie = [];
+    let saldoP = saldoHoje;
+    for (let d = 1; d <= horizonte; d++) {
+      const dia = new Date(hoje); dia.setDate(dia.getDate() + d);
+      saldoP += netDia;
+      for (const e of eventos) if (e.data.getFullYear() === dia.getFullYear() && e.data.getMonth() === dia.getMonth() && e.data.getDate() === dia.getDate()) saldoP += e.valor;
+      projSerie.push({ data: dia, saldo: saldoP });
+    }
+    const primeiroNeg = projSerie.find(s => s.saldo < 0);
+    const totalBoletos = U.sum(eventos.filter(e => e.tipo === 'boleto'), e => Math.abs(e.valor));
+    const totalReceb = U.sum(eventos.filter(e => e.tipo === 'receb'), e => e.valor);
+
+    const status = primeiroNeg
+      ? `<div class="alerta bad"><i class="bi bi-exclamation-octagon"></i><div><strong>Atenção ao caixa</strong><p>Considerando saldo atual, boletos a vencer e recebíveis já agendados, a conta pode ficar negativa por volta de ${U.fmtDate(primeiroNeg.data)}. Vale antecipar recebível, negociar prazo de boleto ou segurar despesa.</p></div></div>`
+      : `<div class="alerta ok"><i class="bi bi-check-circle"></i><div><strong>Caixa projetado positivo</strong><p>Com o saldo atual mais o que já está agendado, a conta se mantém positiva nos próximos 90 dias.</p></div></div>`;
+
+    main.innerHTML = `
+      <div class="kpi-grid kpi-grid-4">
+        ${kpiCard({ icon: 'bi-safe2', label: 'Saldo real na conta', valor: U.brl(saldoHoje), sub: 'em ' + U.fmtDate(dataSaldo) + ' (extrato)' })}
+        ${kpiCard({ icon: 'bi-graph-down', label: 'Menor saldo do período', valor: U.brl(saldoMin), sub: diaMin ? U.fmtDate(diaMin.data) : '', cls: saldoMin < 1000 ? 'kpi-warn' : '' })}
+        ${kpiCard({ icon: 'bi-arrow-left-right', label: 'Fluxo líquido / dia', valor: U.brl(netDia), sub: 'média do extrato', cls: netDia < 0 ? 'kpi-bad' : '' })}
+        ${kpiCard({ icon: 'bi-calendar-check', label: 'Já agendado (90d)', valor: U.brl(totalReceb - totalBoletos), sub: U.brl(totalReceb) + ' a receber · ' + U.brl(totalBoletos) + ' boletos' })}
+      </div>
+      ${card('Saldo real na conta × projeção dos próximos 90 dias', '<div class="chart-box tall"><canvas id="ch-fluxo-real"></canvas></div><p class="note">A linha cheia é o saldo que <strong>de fato</strong> esteve na conta (extrato Santander). A pontilhada projeta a partir de hoje, somando ao saldo atual os boletos que vencem e os recebíveis já agendados na Getnet, mais o fluxo médio diário observado.</p>')}
+      ${status}
+      ${card('O que já está agendado para os próximos 90 dias', (() => {
+        const evOrd = eventos.filter(e => e.data <= projSerie[projSerie.length - 1].data).sort((a, b) => a.data - b.data).slice(0, 25);
+        if (!evOrd.length) return '<p class="note">Sem boletos ou recebíveis agendados no período.</p>';
+        const rows = evOrd.map(e => `<tr>
+          <td class="mono">${U.fmtDate(e.data)}</td>
+          <td>${e.tipo === 'boleto' ? '<i class="bi bi-arrow-up-right neg"></i> Boleto' : '<i class="bi bi-arrow-down-left pos"></i> Recebível'} ${U.esc(e.desc || '')}</td>
+          <td class="mono right ${e.valor < 0 ? 'neg' : 'pos'}">${U.brl(e.valor)}</td>
+        </tr>`).join('');
+        return `<div class="table-wrap"><table><thead><tr><th>Data</th><th>Compromisso</th><th class="right">Valor</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+      })())}
+      ${card('Como este fluxo é calculado', `<p class="note">Diferente da projeção por média, este fluxo parte do <strong>saldo real</strong> do seu extrato (${U.brl(saldoHoje)} em ${U.fmtDate(dataSaldo)}) e reconstrói quanto esteve na conta a cada dia. A projeção para frente usa esse saldo como ponto de partida e soma o que você <em>já sabe</em> que vai entrar (recebíveis Getnet) e sair (boletos da planilha).</p>`)}`;
+
+    const p = DB.charts.palette();
+    const passoR = Math.max(1, Math.floor(serie.length / 30));
+    const labelsReal = [], valsReal = [];
+    for (let i = 0; i < serie.length; i += passoR) { labelsReal.push(U.fmtDate(serie[i].data)); valsReal.push(serie[i].saldo); }
+    labelsReal.push(U.fmtDate(dataSaldo)); valsReal.push(saldoHoje);
+    const labelsProj = [], valsProj = [];
+    for (let i = 6; i < projSerie.length; i += 7) { labelsProj.push(U.fmtDate(projSerie[i].data)); valsProj.push(projSerie[i].saldo); }
+    DB.charts.linhaProjecao('ch-fluxo-real', labelsReal, valsReal, labelsProj, valsProj);
   }
 
   function viewLancamentos(tipo) {
