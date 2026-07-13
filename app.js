@@ -667,7 +667,14 @@
     if (!destoando.length) destoando = ['<div class="alerta ok"><i class="bi bi-check-circle"></i><div><strong>Nenhum grupo fora da referência</strong><p>Estrutura de custos saudável para o faturamento do mês.</p></div></div>'];
 
     /* ---- 4b. Saídas fixas previstas do mês (recorrentes com dia típico) ---- */
-    const fixasPrev = (M.recorrentes || []).filter(r => r.valorMedio >= 150);
+    // Regra: matéria-prima em boleto varia demais (sabor, prazo, valor) e já entra
+    // na aba Boletos com data exata — fica FORA daqui. Exceção: compras semanais
+    // constantes e obrigatórias (creme de leite, leite, água), que são previsíveis.
+    const cmvEssencial = /creme de leite|^leite|^agua|^\u00e1gua|^aguas|^\u00e1guas/i;
+    const fixasPrev = (M.recorrentes || []).filter(r =>
+      r.valorMedio >= 150 &&
+      (r.grupo !== 'cmv' || cmvEssencial.test(U.norm(r.desc)))
+    );
     const totalFixasMes = U.sum(fixasPrev, r => r.valorMedio);
     // agrupa por período do mês
     const faixasFix = [
@@ -696,7 +703,7 @@
           </tr>`).join('')}</tbody></table></div>
         </div>`;
       }).join('')}
-      <p class="note">${faixasFix[0].itens.length && U.sum(faixasFix[0].itens, r => r.valorMedio) > totalGeral * 0.4 ? '<i class="bi bi-exclamation-triangle warn-text"></i> A <strong>primeira quinzena concentra o grosso dos custos fixos</strong> — entre o mês com caixa reforçado até o dia 10.' : 'Os custos fixos estão distribuídos ao longo do mês.'} Boletos de matéria-prima variam mês a mês e aparecem na aba Boletos com data exata.</p>`);
+      <p class="note">${faixasFix[0].itens.length && U.sum(faixasFix[0].itens, r => r.valorMedio) > totalGeral * 0.4 ? '<i class="bi bi-exclamation-triangle warn-text"></i> A <strong>primeira quinzena concentra o grosso dos custos fixos</strong> — entre o mês com caixa reforçado até o dia 10.' : 'Os custos fixos estão distribuídos ao longo do mês.'} Aqui ficam só os gastos <strong>previsíveis e constantes</strong> (incluindo as compras semanais de creme de leite, leite e água). Os boletos de matéria-prima variam muito de valor e prazo (15/30/45 dias) conforme o sabor, então aparecem na aba <strong>Boletos</strong> com a data exata de cada um.</p>`);
 
     /* ---- 4. Gastos recorrentes (assinaturas e compromissos) ---- */
     const recorr = {};
