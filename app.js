@@ -666,6 +666,38 @@
     }
     if (!destoando.length) destoando = ['<div class="alerta ok"><i class="bi bi-check-circle"></i><div><strong>Nenhum grupo fora da referência</strong><p>Estrutura de custos saudável para o faturamento do mês.</p></div></div>'];
 
+    /* ---- 4b. Saídas fixas previstas do mês (recorrentes com dia típico) ---- */
+    const fixasPrev = (M.recorrentes || []).filter(r => r.valorMedio >= 150);
+    const totalFixasMes = U.sum(fixasPrev, r => r.valorMedio);
+    // agrupa por período do mês
+    const faixasFix = [
+      { nome: 'Início do mês (dias 1–10)', min: 1, max: 10, itens: [] },
+      { nome: 'Meio do mês (dias 11–20)', min: 11, max: 20, itens: [] },
+      { nome: 'Fim do mês (dias 21–31)', min: 21, max: 31, itens: [] },
+    ];
+    for (const r of fixasPrev) { const f = faixasFix.find(f => r.diaMes >= f.min && r.diaMes <= f.max); if (f) f.itens.push(r); }
+    const totalGeral = totalFixasMes || 1;
+    const gruposLabel = { financiamento: 'Financiamento', fixos: 'Fixo', folha: 'Folha', impostos: 'Imposto', marketing: 'Marketing', cmv: 'Matéria-prima', outros: 'Outro' };
+
+    const cardFixas = card('Saídas fixas previstas do mês — planejamento', `
+      <p class="note" style="margin-top:0">Compromissos que se repetem todo mês, detectados automaticamente dos seus dados, organizados por quando saem. Total fixo mensal estimado: <strong>${U.brl(totalFixasMes)}</strong>.</p>
+      ${faixasFix.map(f => {
+        const tot = U.sum(f.itens, r => r.valorMedio);
+        if (!f.itens.length) return '';
+        const pct = tot / totalGeral * 100;
+        const cor = pct > 40 ? 'var(--berry)' : pct > 30 ? 'var(--gold)' : 'var(--teal)';
+        return `<div class="fix-faixa">
+          <div class="fix-faixa-head"><strong>${f.nome}</strong><span class="mono">${U.brl(tot)} <span class="dim">(${U.pct(pct, 0)})</span></span></div>
+          <div class="antec-track" style="margin:4px 0 8px"><div class="antec-fill" style="width:${pct.toFixed(1)}%;background:${cor}"></div></div>
+          <div class="table-wrap"><table><tbody>${f.itens.sort((a, b) => a.diaMes - b.diaMes).map(r => `<tr>
+            <td class="mono" style="width:64px">dia ~${r.diaMes}</td>
+            <td>${U.esc(r.desc)} <span class="chip">${gruposLabel[r.grupo] || r.grupo}</span></td>
+            <td class="mono right"><strong>${U.brl(r.valorMedio)}</strong></td>
+          </tr>`).join('')}</tbody></table></div>
+        </div>`;
+      }).join('')}
+      <p class="note">${faixasFix[0].itens.length && U.sum(faixasFix[0].itens, r => r.valorMedio) > totalGeral * 0.4 ? '<i class="bi bi-exclamation-triangle warn-text"></i> A <strong>primeira quinzena concentra o grosso dos custos fixos</strong> — entre o mês com caixa reforçado até o dia 10.' : 'Os custos fixos estão distribuídos ao longo do mês.'} Boletos de matéria-prima variam mês a mês e aparecem na aba Boletos com data exata.</p>`);
+
     /* ---- 4. Gastos recorrentes (assinaturas e compromissos) ---- */
     const recorr = {};
     for (const t of M.txs.filter(t => t.tipo === 'Saída')) {
@@ -693,6 +725,7 @@
       ${kpis}
       ${raioX}
       ${card('O que está destoando', `<div class="alerta-list">${destoando.join('')}</div>`)}
+      ${cardFixas}
       <div class="grid-2">
         ${card('Saídas por categoria — ' + U.ymLabel(mesKey), '<div class="chart-box tall"><canvas id="ch-sd-cat"></canvas></div>')}
         ${card('Evolução dos 5 maiores grupos', '<div class="chart-box tall"><canvas id="ch-sd-evo"></canvas></div>')}

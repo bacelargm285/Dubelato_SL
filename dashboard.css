@@ -352,3 +352,10 @@ tr:hover td { background: var(--surface-2); }
 .retirada-box.espere .retirada-icone { color: var(--tx-3); }
 .retirada-titulo { font-family: 'Fraunces', serif; font-size: 17px; font-weight: 600; margin-bottom: 4px; }
 .retirada-box p { margin: 4px 0 0; }
+
+/* -------- saídas fixas previstas -------- */
+.fix-faixa { margin-bottom: 16px; }
+.fix-faixa-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.fix-faixa-head strong { font-size: 13.5px; }
+.fix-faixa table { font-size: 13px; }
+.fix-faixa td { padding: 4px 8px; }
