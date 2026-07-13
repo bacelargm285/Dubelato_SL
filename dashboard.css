@@ -359,3 +359,15 @@ tr:hover td { background: var(--surface-2); }
 .fix-faixa-head strong { font-size: 13.5px; }
 .fix-faixa table { font-size: 13px; }
 .fix-faixa td { padding: 4px 8px; }
+
+/* -------- produção possível -------- */
+.chip-btn { padding: 6px 14px; border-radius: 20px; border: 1px solid var(--line); background: var(--surface); color: var(--tx-2); cursor: pointer; font-size: 13px; font-weight: 500; transition: all .15s; }
+.chip-btn:hover { border-color: var(--teal); }
+.chip-btn.on { background: var(--teal); color: #fff; border-color: var(--teal); }
+.chip.novo { background: rgba(192,145,63,.15); color: var(--gold); font-weight: 600; }
+.pop-bar { height: 8px; background: var(--surface-2); border-radius: 6px; overflow: hidden; min-width: 60px; }
+.pop-fill { height: 100%; background: linear-gradient(90deg, var(--teal), var(--gold)); border-radius: 6px; }
+.novo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.novo-card { padding: 12px; border-radius: 12px; background: linear-gradient(135deg, rgba(31,138,128,.08), rgba(192,145,63,.08)); border: 1px solid rgba(192,145,63,.25); }
+.novo-nome { font-weight: 600; font-size: 14px; margin-bottom: 2px; }
+.novo-tipo { font-size: 11px; color: var(--gold); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 4px; }

@@ -430,12 +430,50 @@ DB.excel = (function () {
 
   /* ---------- ORQUESTRAÇÃO ---------- */
 
+  /** Sabores_Receitas: Sabor | Tipo | Ingrediente | Unidade | Quantidade */
+  function parseReceitas(ws) {
+    const rows = grid(ws);
+    if (!rows || rows.length < 2) return null;
+    // acha o cabeçalho pela presença de "sabor" e "ingrediente"
+    let hi = -1, cols = {};
+    for (let i = 0; i < Math.min(5, rows.length); i++) {
+      const r = (rows[i] || []).map(c => U.norm(c));
+      const cS = r.findIndex(c => c === 'sabor' || c.includes('sabor'));
+      const cI = r.findIndex(c => c.includes('ingrediente'));
+      if (cS >= 0 && cI >= 0) {
+        hi = i;
+        cols = {
+          sabor: cS, ingrediente: cI,
+          tipo: r.findIndex(c => c.includes('tipo')),
+          unidade: r.findIndex(c => c.includes('unidade') || c.includes('unid')),
+          qtd: r.findIndex(c => c.includes('quantidade') || c.includes('qtd') || c.includes('qt')),
+        };
+        break;
+      }
+    }
+    if (hi < 0) return null;
+    const out = [];
+    for (let i = hi + 1; i < rows.length; i++) {
+      const r = rows[i]; if (!r) continue;
+      const sabor = r[cols.sabor], ing = r[cols.ingrediente];
+      if (!sabor || !ing) continue;
+      out.push({
+        sabor: String(sabor).trim(),
+        tipo: cols.tipo >= 0 && r[cols.tipo] ? String(r[cols.tipo]).trim() : '',
+        ingrediente: String(ing).trim(),
+        unidade: cols.unidade >= 0 && r[cols.unidade] ? String(r[cols.unidade]).trim() : 'g',
+        qtd: cols.qtd >= 0 ? U.toNum(r[cols.qtd]) || 0 : 0,
+      });
+    }
+    return out.length ? out : null;
+  }
+
   /**
    * Lê o workbook inteiro e classifica cada aba pelo CONTEÚDO,
    * não pelo nome. Retorna o modelo de dados bruto.
    */
   function parseWorkbook(wb) {
-    const model = { txs: [], estoque: [], boletos: [], cartao: [], cubas: null, producao: [], nutricional: null, metas: null, abas: [], avisos: [] };
+    const model = { txs: [], estoque: [], boletos: [], cartao: [], cubas: null, producao: [], nutricional: null, metas: null, receitas: null, abas: [], avisos: [] };
     const nomes = wb.SheetNames;
 
     // 1ª passada: lançamentos (para descobrir o ano de referência dos boletos)
@@ -443,6 +481,11 @@ DB.excel = (function () {
       const ws = wb.Sheets[name];
       const n = U.norm(name);
       if (n.includes('detalhado') || n.includes('resumo')) { model.abas.push({ name, tipo: 'resumo (ignorada — recalculado)' }); continue; }
+      // Sabores_Receitas: Sabor|Tipo|Ingrediente|Unidade|Quantidade (planejador de produção)
+      if (n.includes('sabor') && n.includes('receita')) {
+        const rec = parseReceitas(ws);
+        if (rec) { model.receitas = rec; model.abas.push({ name, tipo: `receitas (${new Set(rec.map(r => r.sabor)).size} sabores, ${rec.length} linhas)` }); continue; }
+      }
       if (n.includes('cuba') || n.includes('receita') || n.includes('sabor')) {
         const cb = parseCubas(ws);
         if (cb) { model.cubas = cb; model.abas.push({ name, tipo: `cubas (${cb.receitas.length} sabores, ${Object.keys(cb.precos).length} preços, ${cb.produtos.length} produtos)` }); continue; }

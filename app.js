@@ -11,6 +11,8 @@
   let CUBAS = null;      // custos de produção
   let GETNET = null;     // dados da maquininha (localStorage)
   let PROD = null;       // produção de cubas
+  let RECEITAS = null;   // índice de receitas (Sabores_Receitas)
+  let RAN = null;        // análise de produção possível
   let GAN = null;        // análise getnet
   let BANCO = null;      // extrato bancário (localStorage)
   let BAN = null;        // análise do banco
@@ -93,6 +95,8 @@
     INV = RAW.estoque.length ? DB.inventory.build(RAW.estoque) : null;
     CUBAS = DB.cubas.build(RAW.cubas);
     PROD = RAW.producao && RAW.producao.length ? DB.producao.build(RAW.producao, CUBAS) : null;
+    RECEITAS = RAW.receitas && RAW.receitas.length ? DB.receitas.build(RAW.receitas) : null;
+    RAN = RECEITAS ? DB.receitas.analisar(RECEITAS, RAW.estoque, PROD) : null;
     GETNET = DB.getnet.carregar();
     GAN = GETNET ? DB.getnet.analisar(GETNET, M) : null;
     BANCO = DB.banco.carregar();
@@ -197,7 +201,7 @@
       const fn = {
         dashboard: viewDashboard, dre: viewDRE, fluxo: viewFluxo, entradas: () => viewLancamentos('Entrada'),
         saidas: viewSaidas, boletos: viewBoletos, estoque: viewEstoque,
-        ifood: viewIfood, funcionarios: viewFuncionarios, marketing: viewMarketing, cubas: viewCubas, getnet: viewGetnet, banco: viewBanco, antecipacao: viewAntecipacao, producao: viewProducao, nutricional: viewNutricional,
+        ifood: viewIfood, funcionarios: viewFuncionarios, marketing: viewMarketing, cubas: viewCubas, getnet: viewGetnet, banco: viewBanco, antecipacao: viewAntecipacao, producao: viewProducao, producaoPossivel: viewProducaoPossivel, nutricional: viewNutricional,
         comparativos: viewComparativos, clima: viewClima, consultoria: viewConsultoria, alertas: viewAlertas, config: viewConfig,
       }[viewAtual] || viewDashboard;
       main.innerHTML = '';
@@ -1674,6 +1678,96 @@
     { nome: 'Cascão 1 bola (150 g)', g: 150 },
     { nome: 'Cascão 2 bolas (250 g)', g: 250 },
   ];
+
+  function viewProducaoPossivel(main) {
+    if (!RAN) {
+      main.innerHTML = card('Produção possível', '<p class="note">Adicione a aba <strong>Sabores_Receitas</strong> na planilha (colunas Sabor, Tipo, Ingrediente, Unidade, Quantidade) para o sistema cruzar as receitas com o estoque e mostrar o que dá para produzir agora.</p>');
+      return;
+    }
+    const A = RAN;
+    const filtroTipo = prodFiltroTipo || 'todos';
+    const tipos = [...new Set(A.todos.map(r => r.tipo).filter(Boolean))];
+
+    const aplicaFiltro = lista => filtroTipo === 'todos' ? lista : lista.filter(r => r.tipo === filtroTipo);
+    const produziveis = aplicaFiltro(A.produziveis);
+    const nuncaFeitos = aplicaFiltro(A.nuncaFeitos);
+    const bloqueados = aplicaFiltro(A.bloqueados);
+
+    const chip = (r) => {
+      if (r.nuncaFeito) return '<span class="chip novo"><i class="bi bi-stars"></i> nunca feito</span>';
+      return '';
+    };
+    const infoIngredientes = r => {
+      const partes = [];
+      if (r.naoControlado.length) partes.push(`${r.naoControlado.length} não controlado(s) no estoque`);
+      if (r.frescos.length) partes.push(`${r.frescos.length} fruta(s) fresca(s)`);
+      return partes.length ? `<span class="dim">${partes.join(' · ')}</span>` : '';
+    };
+
+    // KPIs
+    const kpis = `<div class="kpi-grid kpi-grid-4">
+      ${kpiCard({ icon: 'bi-check2-circle', label: 'Dá para produzir agora', valor: String(A.totalProduziveis), sub: 'de ' + A.totalSabores + ' sabores' })}
+      ${kpiCard({ icon: 'bi-stars', label: 'Nunca feitos disponíveis', valor: String(A.nuncaFeitos.length), sub: 'potenciais lançamentos' })}
+      ${kpiCard({ icon: 'bi-x-circle', label: 'Bloqueados', valor: String(A.bloqueados.length), sub: 'falta ingrediente' })}
+      ${kpiCard({ icon: 'bi-egg-fried', label: 'Receitas cadastradas', valor: String(A.totalSabores), sub: 'na aba Sabores_Receitas' })}
+    </div>`;
+
+    // filtro de tipo
+    const filtroBtns = `<div class="cuba-toggle" style="margin-bottom:12px">
+      <button class="chip-btn ${filtroTipo === 'todos' ? 'on' : ''}" data-tipo="todos">Todos</button>
+      ${tipos.map(t => `<button class="chip-btn ${filtroTipo === t ? 'on' : ''}" data-tipo="${U.esc(t)}">${U.esc(t)}</button>`).join('')}
+    </div>`;
+
+    // lista de produzíveis (prioridade por venda)
+    const linhaProduzivel = r => `<tr>
+      <td><strong>${U.esc(r.nome)}</strong> ${chip(r)}</td>
+      <td class="dim">${U.esc(r.tipo)}</td>
+      <td>${r.volume > 0 ? `<div class="pop-bar"><div class="pop-fill" style="width:${(r.popularidade * 100).toFixed(0)}%"></div></div>` : '<span class="dim">—</span>'}</td>
+      <td class="mono right">${r.volume > 0 ? r.volume.toFixed(0) + ' cubas' : '<span class="dim">novo</span>'}</td>
+      <td>${infoIngredientes(r)}</td>
+    </tr>`;
+
+    const tabelaProduziveis = produziveis.length ? `<div class="table-wrap"><table>
+      <thead><tr><th>Sabor</th><th>Tipo</th><th>Popularidade</th><th class="right">Já produzido</th><th>Observação</th></tr></thead>
+      <tbody>${produziveis.map(linhaProduzivel).join('')}</tbody></table></div>` : '<p class="note">Nenhum sabor produzível neste filtro.</p>';
+
+    // nunca feitos (destaque)
+    const cardNunca = nuncaFeitos.length ? card('<i class="bi bi-stars"></i> Nunca feitos — potenciais lançamentos', `
+      <p class="note" style="margin-top:0">Sabores com receita cadastrada e ingredientes disponíveis, que a loja ainda não produziu. Boas apostas para testar como novidade:</p>
+      <div class="novo-grid">
+        ${nuncaFeitos.slice(0, 18).map(r => `<div class="novo-card">
+          <div class="novo-nome">${U.esc(r.nome)}</div>
+          <div class="novo-tipo">${U.esc(r.tipo)}</div>
+          ${r.frescos.length ? `<div class="dim" style="font-size:11px">precisa: ${r.frescos.map(f => U.esc(f.nome)).join(', ')}</div>` : ''}
+        </div>`).join('')}
+      </div>`) : '';
+
+    // bloqueados
+    const cardBloq = bloqueados.length ? card('Bloqueados — falta ingrediente no estoque', `
+      <div class="table-wrap"><table>
+        <thead><tr><th>Sabor</th><th>Tipo</th><th>Ingredientes em falta</th></tr></thead>
+        <tbody>${bloqueados.slice(0, 40).map(r => `<tr>
+          <td><strong>${U.esc(r.nome)}</strong></td>
+          <td class="dim">${U.esc(r.tipo)}</td>
+          <td class="neg">${r.faltando.map(f => U.esc(f.item || f.nome)).join(', ')}</td>
+        </tr>`).join('')}</tbody></table></div>
+      <p class="note">Comprando esses itens, você libera a produção destes sabores. Ingredientes marcados aqui são os que estão zerados no estoque de produção.</p>`) : '';
+
+    main.innerHTML = `
+      ${card('Produção possível — o que dá para fazer com o estoque de hoje', `
+        <p class="note" style="margin-top:0">O sistema leu as ${A.totalSabores} receitas, conferiu o estoque atual e concluiu o que você consegue produzir agora. A lista de produzíveis vem ordenada por <strong>popularidade</strong> (o quanto cada sabor já foi produzido), então você começa pelos que mais vendem.</p>
+        ${kpis}`)}
+      ${card('Sabores que dá para produzir agora', filtroBtns + tabelaProduziveis)}
+      ${cardNunca}
+      ${cardBloq}
+      ${card('Como isto é calculado', `<p class="note">Para cada receita, o sistema casa os ingredientes com o estoque (mesmo com nomes um pouco diferentes, tipo "Base 6 MEC 3" e "Base 6"). Um sabor é <strong>produzível</strong> quando nenhum ingrediente controlado está zerado. Frutas frescas (morango, abacaxi, limão…) são tratadas como compra do dia e não bloqueiam. <strong>Em breve:</strong> quando você preencher os preços no estoque e nas receitas, esta aba vai rankear os sabores por <strong>custo e margem</strong> — mostrando os mais lucrativos para priorizar no fim de semana.</p>`)}`;
+
+    // liga os filtros de tipo
+    main.querySelectorAll('.chip-btn[data-tipo]').forEach(b => b.addEventListener('click', () => {
+      prodFiltroTipo = b.dataset.tipo; render();
+    }));
+  }
+  let prodFiltroTipo = 'todos';
 
   function viewNutricional(main) {
     const NUT = RAW.nutricional;

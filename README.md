@@ -65,3 +65,16 @@ boletos** (planilha × débitos na conta).
 Para os sócios verem: botão **Baixar arquivo para publicar** gera o
 `banco_dados.json`, que você sobe no repositório junto da planilha e do
 `getnet_dados.json`. São os 3 arquivos de dados atualizados pelo mesmo caminho.
+
+## Produção possível (aba)
+
+Adicione na planilha a aba **Sabores_Receitas** com as colunas: Sabor, Tipo,
+Ingrediente, Unidade, Quantidade (uma linha por ingrediente de cada sabor). O
+sistema cruza as receitas com o **Estoque** e mostra:
+- Quais sabores dá para **produzir agora** (ordenados por popularidade histórica);
+- Sabores **nunca feitos** com ingredientes disponíveis (potenciais lançamentos);
+- Sabores **bloqueados** e qual ingrediente falta comprar.
+
+Frutas frescas (morango, abacaxi, limão…) são tratadas como compra do dia e não
+bloqueiam a produção. Quando os preços forem preenchidos no estoque e nas
+receitas, a aba passará a rankear os sabores por custo e margem.
