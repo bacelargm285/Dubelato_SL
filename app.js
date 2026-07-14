@@ -462,15 +462,23 @@
       }
     }
 
-    // ENTRADA DE CAIXA DIÁRIA (loja abre todo dia): débito cai em D+1, PIX e
-    // dinheiro entram na hora. Crédito NÃO entra aqui (já vem pelos recebíveis
-    // da agenda Getnet, para não contar em dobro). Estima a venda de cada dia
-    // pela previsão (clima × calendário) ou, sem ela, pela média recente, e
-    // quebra na proporção real das formas de pagamento.
-    const mix = GAN && GAN.mix ? GAN.mix : { debito: 0.40, pix: 0.12, taxaDebito: 0.009 };
-    const dinheiroPct = 0.119; // ~12% do balcão é dinheiro (planilha vs maquininha)
-    // fração da venda total que entra no caixa dia a dia (fora o crédito):
-    // participação de débito+pix dentro de cartão/pix, mais o dinheiro do balcão
+    // ENTRADA DE CAIXA DIÁRIA (loja abre todo dia): débito cai em D+1, PIX,
+    // dinheiro e crédito (via previsão após a agenda). A venda de cada dia é
+    // dividida entre as formas de pagamento — TUDO junto soma 100% da venda.
+    // O mix da Getnet (crédito+débito+PIX) cobre só o que passa na maquininha;
+    // o dinheiro é uma fatia à parte do balcão. Reescalamos para que
+    // crédito+débito+PIX+dinheiro = 100% da venda total (senão contaria demais).
+    const mixG = GAN && GAN.mix ? GAN.mix : { credito: 0.483, debito: 0.396, pix: 0.121, taxaDebito: 0.009, taxaCredito: 0.014 };
+    const dinheiroPct = 0.119;                       // ~12% do total de vendas é dinheiro
+    const escalaMaq = 1 - dinheiroPct;               // o restante (~88%) passa na maquininha
+    const mix = {
+      credito: mixG.credito * escalaMaq,
+      debito: mixG.debito * escalaMaq,
+      pix: mixG.pix * escalaMaq,
+      taxaDebito: mixG.taxaDebito || 0.009,
+      taxaCredito: mixG.taxaCredito || 0.014,
+    };
+    // agora credito+debito+pix+dinheiro ≈ 100% da venda total
     function vendaPrevistaDoDia(dia) {
       if (CLIMA && CLIMA.previsaoDemanda) {
         const p = CLIMA.previsaoDemanda.find(x => x.data.getFullYear() === dia.getFullYear() && x.data.getMonth() === dia.getMonth() && x.data.getDate() === dia.getDate());
@@ -484,6 +492,19 @@
       // fallback: venda média por dia da semana dos últimos 60 dias de lançamentos
       return vendaMediaDiaSemana(dia.getDay());
     }
+    // CMV FUTURO (matéria-prima): custo real grande (~28% da receita) que na
+    // maior parte não está cadastrado como boleto para os meses à frente. Sem
+    // ele, o caixa projetado sobe artificialmente. Injetamos como saída
+    // proporcional à venda, MAS só a partir do fim da cobertura dos boletos de
+    // CMV já cadastrados, para não contar duas vezes.
+    const mesesFech = M.meses.filter(k => k !== M.mesAtualKey && M.byMonth[k].receita > 5000).slice(-3);
+    const cmvPct = mesesFech.length ? U.avg(mesesFech.map(k => M.byMonth[k].cmv / M.byMonth[k].receita)) : 0.28;
+    // último vencimento de boleto de MATÉRIA-PRIMA já cadastrado (exclui
+    // financiamentos como Tortelli, que vão até novembro e não são CMV).
+    const ehFinanc = b => /tortelli|celso/i.test(U.norm(b.desc || ''));
+    const boletosCmvFut = (M.boletos || []).filter(b => b.venc > hoje && !ehFinanc(b));
+    const fimCoberturaCmv = boletosCmvFut.length ? boletosCmvFut.reduce((mx, b) => (b.venc > mx ? b.venc : mx), hoje) : hoje;
+
     // data em que a agenda de recebíveis de crédito da Getnet termina; depois
     // dela, o crédito não pára de entrar — apenas deixamos de ter a agenda
     // exata, então estimamos pela venda prevista (crédito cai ~D+1 na cessão).
@@ -492,21 +513,22 @@
     const projSerie = [];
     let saldoP = saldoHoje;
     let entradaVendaTotal = 0;
+    let cmvTotal = 0;
     for (let d = 1; d <= horizonte; d++) {
       const dia = new Date(hoje); dia.setDate(dia.getDate() + d);
       const venda = vendaPrevistaDoDia(dia) || 0;
-      // débito líquido (D+1: usa a venda do dia anterior) + PIX e dinheiro (hoje)
       const ontem = new Date(dia); ontem.setDate(ontem.getDate() - 1);
       const vendaOntem = vendaPrevistaDoDia(ontem) || 0;
       const entradaDebito = vendaOntem * mix.debito * (1 - (mix.taxaDebito || 0.009));
       const entradaPix = venda * mix.pix;
       const entradaDinheiro = venda * dinheiroPct;
-      // crédito: enquanto a agenda Getnet cobre, ele vem pelos eventos 'receb';
-      // depois disso, estimamos pela venda do dia anterior (antecipação ~D+1)
       const entradaCredito = dia > ultRecebivel ? vendaOntem * mix.credito * (1 - (mix.taxaCredito || 0.014)) : 0;
       const entradaDia = entradaDebito + entradaPix + entradaDinheiro + entradaCredito;
       entradaVendaTotal += entradaDia;
       saldoP += entradaDia;
+      // CMV estimado (matéria-prima) proporcional à venda, só após a cobertura
+      // dos boletos de CMV já cadastrados (senão conta duas vezes)
+      if (dia > fimCoberturaCmv) { const cmvDia = venda * cmvPct; saldoP -= cmvDia; cmvTotal += cmvDia; }
       for (const e of eventos) if (e.data.getFullYear() === dia.getFullYear() && e.data.getMonth() === dia.getMonth() && e.data.getDate() === dia.getDate()) saldoP += e.valor;
       projSerie.push({ data: dia, saldo: saldoP });
     }
