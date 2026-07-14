@@ -132,5 +132,118 @@ DB.analytics = (function () {
     return p;
   }
 
-  return { insights, resumoExecutivo };
+  return { insights, resumoExecutivo, resumoDoMes };
+
+  /**
+   * Resumo narrativo do mês ATUAL, lendo receita, ritmo, custos, DRE, projeção
+   * de vendas e comparação com o mês anterior e o mesmo mês do ano passado.
+   * Retorna array de parágrafos (HTML) para exibir no Dashboard.
+   * @param model  modelo financeiro
+   * @param ctx    { getnet, previsaoMes, diaDoMes } opcional
+   */
+  function resumoDoMes(model, ctx) {
+    ctx = ctx || {};
+    const U = DB.utils;
+    const cur = model.cur;
+    if (!cur || cur.receita < 100) return ['<p>Ainda não há lançamentos suficientes no mês atual para uma análise.</p>'];
+
+    const prev = model.byMonth[model.mesAnteriorKey];
+    // mesmo mês do ano anterior (ex.: 2025-07 para 2026-07)
+    const [y, mo] = cur.mes.split('-');
+    const anoAntKey = (y - 1) + '-' + mo;
+    const anoAnt = model.byMonth[anoAntKey];
+
+    const hoje = new Date();
+    const [cy, cm] = cur.mes.split('-').map(Number);
+    const ehMesCorrente = (hoje.getFullYear() === cy && hoje.getMonth() + 1 === cm);
+    const diaDoMes = ehMesCorrente ? hoje.getDate() : new Date(cy, cm, 0).getDate();
+    const diasNoMes = new Date(cy, cm, 0).getDate();
+    const fracaoMes = diaDoMes / diasNoMes;
+    const nomeMes = new Date(cy, cm - 1, 1).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+
+    const paras = [];
+
+    // 1. RECEITA E RITMO
+    let p1 = `<strong>${nomeMes.charAt(0).toUpperCase() + nomeMes.slice(1)}.</strong> `;
+    if (ehMesCorrente) {
+      const projFim = cur.receita / fracaoMes;
+      p1 += `Até o dia ${diaDoMes}, a loja faturou <strong>${U.brl(cur.receita)}</strong> (${(fracaoMes * 100).toFixed(0)}% do mês transcorrido). Mantido o ritmo, o mês deve fechar por volta de <strong>${U.brl(projFim)}</strong>. `;
+      if (prev && prev.receita > 0) {
+        const ritmoVsPrev = (projFim / prev.receita - 1) * 100;
+        p1 += ritmoVsPrev >= 0
+          ? `Isso seria ${U.pct(ritmoVsPrev, 0)} acima do mês anterior (${U.brl(prev.receita)}). `
+          : `Isso seria ${U.pct(Math.abs(ritmoVsPrev), 0)} abaixo do mês anterior (${U.brl(prev.receita)}). `;
+      }
+    } else {
+      p1 += `A loja faturou <strong>${U.brl(cur.receita)}</strong> no mês. `;
+      if (prev && prev.receita > 0) {
+        const d = (cur.receita / prev.receita - 1) * 100;
+        p1 += d >= 0 ? `Foi ${U.pct(d, 0)} acima do mês anterior. ` : `Foi ${U.pct(Math.abs(d), 0)} abaixo do mês anterior. `;
+      }
+    }
+    if (anoAnt && anoAnt.receita > 0) {
+      const yoy = ((ehMesCorrente ? cur.receita / fracaoMes : cur.receita) / anoAnt.receita - 1) * 100;
+      p1 += `Na comparação com ${nomeMes.split(' ')[0]} do ano passado (${U.brl(anoAnt.receita)}), o crescimento projetado é de ${U.pct(yoy, 0)}. `;
+    }
+    paras.push(p1);
+
+    // 2. CUSTOS E MARGEM (DRE resumido)
+    let p2 = '';
+    const cmvPct = cur.cmvPct, folhaPct = cur.folhaPct;
+    const margem = cur.margem;
+    p2 += `Do lado dos custos, `;
+    const notas = [];
+    if (cmvPct != null) {
+      const ok = cmvPct <= 35;
+      notas.push(`a matéria-prima (CMV) está em ${U.pct(cmvPct)}${ok ? ', dentro do saudável para gelateria (até 35%)' : ', acima do ideal — vale revisar compras e porcionamento'}`);
+    }
+    if (folhaPct != null) {
+      const ok = folhaPct <= 30;
+      notas.push(`a folha em ${U.pct(folhaPct)}${ok ? '' : ' (um pouco alta)'}`);
+    }
+    p2 += notas.join(', ') + '. ';
+    if (margem != null) {
+      p2 += margem >= 15
+        ? `A margem operacional está confortável, em <strong>${U.pct(margem)}</strong>${cur.resultadoOp != null ? ` (resultado de ${U.brl(cur.resultadoOp)})` : ''}. `
+        : margem >= 0
+          ? `A margem operacional está apertada, em <strong>${U.pct(margem)}</strong>${cur.resultadoOp != null ? ` (resultado de ${U.brl(cur.resultadoOp)})` : ''} — há espaço para melhorar. `
+          : `A operação fechou no <strong>vermelho</strong> este mês (resultado de ${U.brl(cur.resultadoOp)}), puxada por custos acima da receita${ehMesCorrente ? ', mas lembre-se que o mês ainda está em curso' : ''}. `;
+    }
+    // financiamento
+    if (cur.financiamento > 0) {
+      p2 += `Além da operação, saíram ${U.brl(cur.financiamento)} de financiamento (Tortelli/Celso) — que não é despesa do negócio, mas consome caixa até terminar em novembro. `;
+    }
+    paras.push(p2);
+
+    // 3. CAIXA E PROJEÇÃO
+    let p3 = '';
+    const fluxo = ctx.fluxo;
+    if (fluxo && fluxo.saldoHoje != null) {
+      p3 += `No caixa real, a conta tem <strong>${U.brl(fluxo.saldoHoje)}</strong>. `;
+      if (fluxo.primeiroNeg) {
+        p3 += `A projeção acende um alerta: o caixa pode ficar apertado por volta de ${U.fmtDate(fluxo.primeiroNeg)}, então vale segurar compras não essenciais e, se precisar, antecipar um recebível naquela semana. `;
+      } else {
+        p3 += `A projeção dos próximos 90 dias se mantém positiva, com o caixa se recompondo após os pagamentos fixos do início de cada mês. `;
+      }
+    }
+    // reserva
+    if (model.kpi.custoFixoMedio > 0 && fluxo && fluxo.saldoHoje != null) {
+      const meses = fluxo.saldoHoje / model.kpi.custoFixoMedio;
+      if (meses < 1) p3 += `A reserva de caixa ainda é curta (cobre ${meses.toFixed(1).replace('.', ',')} mês de custo fixo) — reforçá-la é a prioridade antes de qualquer retirada. `;
+    }
+    if (p3) paras.push(p3);
+
+    // 4. VEREDITO
+    let p4 = '<strong>Em resumo:</strong> ';
+    const sinais = [];
+    if (ehMesCorrente && prev) { const proj = cur.receita / fracaoMes; sinais.push(proj >= prev.receita ? 'vendas em ritmo bom' : 'vendas mais fracas que o mês passado'); }
+    if (margem != null) sinais.push(margem >= 15 ? 'margem saudável' : margem >= 0 ? 'margem apertada' : 'operação no vermelho');
+    if (cmvPct != null && cmvPct > 35) sinais.push('CMV a vigiar');
+    if (fluxo && fluxo.primeiroNeg) sinais.push('atenção ao caixa na virada do mês');
+    p4 += sinais.length ? sinais.join(', ') + '. ' : 'mês dentro do esperado. ';
+    p4 += ehMesCorrente ? 'Acompanhe os próximos dias para confirmar a tendência.' : 'Use estes números como base para planejar o próximo mês.';
+    paras.push(p4);
+
+    return paras.map(p => `<p>${p}</p>`);
+  }
 })();

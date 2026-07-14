@@ -345,11 +345,26 @@
         <p class="note dim">A marquinha na barra indica onde o mês "deveria" estar pelo dia de hoje. Edite as metas na aba <code>Metas</code> da planilha.</p>`);
     }
 
+    /* --- Resumo inteligente do mês --- */
+    let resumoMesCard = '';
+    try {
+      // garante que a projeção de fluxo foi calculada (popula FLUXO_RESUMO)
+      if (!FLUXO_RESUMO && BAN && BAN.saldoDiario && BAN.saldoDiario.length >= 5) {
+        const tmp = document.createElement('div');
+        try { viewFluxoReal(tmp); } catch (e) { /* ignora */ }
+      }
+      const paras = DB.analytics.resumoDoMes(M, { fluxo: FLUXO_RESUMO, getnet: GAN });
+      if (paras && paras.length) {
+        resumoMesCard = card('<i class="bi bi-lightbulb"></i> Como está o mês — análise automática', `<div class="resumo">${paras.join('')}</div>`);
+      }
+    } catch (e) { /* silencioso */ }
+
     main.innerHTML = `
       ${M.suspeitos && M.suspeitos.length ? `<div class="alerta warn" style="margin-bottom:14px;cursor:pointer" onclick="__dbIrAlertas()"><i class="bi bi-exclamation-triangle"></i><div><strong>${M.suspeitos.length} lançamento(s) com possível erro de digitação</strong><p>Encontrei datas ou valores que parecem digitados errado (ex.: ano trocado). Clique aqui ou veja a aba <strong>Alertas</strong> para conferir e corrigir na planilha.</p></div></div>` : ''}
       <div class="kpi-grid">${kpis}</div>
       ${metasCard}
       ${visaoDiaria}
+      ${resumoMesCard}
       <div class="grid-2">
         ${card('Entradas × Saídas por mês', '<div class="chart-box"><canvas id="ch-es"></canvas></div>')}
         ${card('Despesas por categoria' + (m ? ' — ' + U.ymLabel(m.mes) : ''), '<div class="chart-box"><canvas id="ch-cat"></canvas></div>')}
