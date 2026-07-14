@@ -78,16 +78,19 @@ DB.excel = (function () {
       if (!date || valor == null) continue;
       if (tipoN !== 'entrada' && tipoN !== 'saida') continue;
       const mesCell = c.mes != null ? r[c.mes] : null;
-      let mes = null;
+      let mes = null, mesColStr = null;
       if (typeof mesCell === 'string' && /^\d{4}-\d{1,2}/.test(mesCell.trim())) {
         const [y, m] = mesCell.trim().split('-');
-        mes = y + '-' + String(+m).padStart(2, '0');
+        mesColStr = y + '-' + String(+m).padStart(2, '0');
       } else {
         const md = U.toDate(mesCell);
-        mes = md ? U.ymKey(md) : U.ymKey(date);
+        if (md) mesColStr = U.ymKey(md);
       }
+      // o mês oficial do lançamento é sempre o da DATA (fonte da verdade);
+      // mesColStr guarda o que a coluna "Mês" da planilha diz, para checagem
+      mes = U.ymKey(date);
       txs.push({
-        date, mes,
+        date, mes, mesColuna: mesColStr,
         desc: String(r[c.desc] ?? '').trim(),
         tipo: tipoN === 'entrada' ? 'Entrada' : 'Saída',
         categoria: String(r[c.categoria] ?? 'Sem categoria').trim() || 'Sem categoria',
@@ -524,23 +527,42 @@ DB.excel = (function () {
     });
     model.txs.sort((a, b) => a.date - b.date);
 
-    // saneamento de datas: meses com ≥15 lançamentos definem o intervalo real da
-    // operação; datas fora dele (erros de digitação como 1125, 2028…) são
-    // separadas em "suspeitos" e listadas em Configurações para correção.
+    // ===== DETECÇÃO DE ERROS DE DIGITAÇÃO =====
+    // Guarda cada lançamento suspeito com o MOTIVO, para alertar sem remover
+    // silenciosamente. O mês oficial é sempre o da data; a coluna "Mês" da
+    // planilha é apenas conferida.
     const porMesQt = {};
     model.txs.forEach(t => porMesQt[t.mes] = (porMesQt[t.mes] || 0) + 1);
     const core = Object.keys(porMesQt).filter(k => porMesQt[k] >= 15).sort();
     model.suspeitos = [];
+    const foraPeriodo = [];
     if (core.length) {
       const min = core[0], max = core[core.length - 1];
       model.txs = model.txs.filter(t => {
-        const ok = t.mes >= min && t.mes <= max;
-        if (!ok) model.suspeitos.push(t);
-        return ok;
+        const dentro = t.mes >= min && t.mes <= max;
+        if (!dentro) { foraPeriodo.push(t); t._motivo = `data ${U.fmtDate(t.date)} fora do período de operação (${min} a ${max}) — provável erro de ano`; }
+        return dentro;
       });
-      if (model.suspeitos.length) {
-        model.avisos.push(`${model.suspeitos.length} lançamento(s) com data fora do período ${min} a ${max} foram separados (provável erro de digitação do ano). Veja a lista em Configurações e corrija na planilha.`);
-      }
+    }
+    // demais checagens sobre os lançamentos que ficaram
+    const anoAtual = new Date().getFullYear();
+    for (const t of model.txs) {
+      const motivos = [];
+      const ano = t.date.getFullYear();
+      // ano implausível
+      if (ano < anoAtual - 2 || ano > anoAtual + 1) motivos.push(`ano ${ano} parece errado`);
+      // coluna Mês não bate com a data
+      if (t.mesColuna && t.mesColuna !== t.mes) motivos.push(`a coluna "Mês" diz ${t.mesColuna}, mas a data é ${U.fmtDate(t.date)} (${t.mes})`);
+      // data no futuro
+      if (t.date > new Date(Date.now() + 86400000)) motivos.push(`data ${U.fmtDate(t.date)} está no futuro`);
+      // valor de venda muito alto (possível dígito a mais)
+      if (t.tipo === 'Entrada' && t.valor > 60000) motivos.push(`valor ${U.brl(t.valor)} muito alto para uma venda diária — confira se sobrou um dígito`);
+      if (motivos.length) { t._motivo = motivos.join('; '); model.suspeitos.push(t); }
+    }
+    // junta os fora-de-período no início da lista
+    model.suspeitos = foraPeriodo.concat(model.suspeitos);
+    if (model.suspeitos.length) {
+      model.avisos.push(`${model.suspeitos.length} lançamento(s) com possível erro de digitação (data ou valor). Veja a lista na aba Alertas e corrija na planilha.`);
     }
 
     // ano de referência p/ boletos = ano do lançamento mais recente

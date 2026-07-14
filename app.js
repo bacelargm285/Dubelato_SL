@@ -77,6 +77,7 @@
 
   // hook para testes automatizados (sem efeito no uso normal)
   window.__dbTest = { carregar: (b, n) => carregar(b, n), irPara: v => { viewAtual = v; render(); }, getModelo: () => M, relatorio: () => gerarRelatorio() };
+  window.__dbIrAlertas = () => { viewAtual = 'alertas'; render(); };
 
   function carregar(buf, nome) {
     try {
@@ -345,6 +346,7 @@
     }
 
     main.innerHTML = `
+      ${M.suspeitos && M.suspeitos.length ? `<div class="alerta warn" style="margin-bottom:14px;cursor:pointer" onclick="__dbIrAlertas()"><i class="bi bi-exclamation-triangle"></i><div><strong>${M.suspeitos.length} lançamento(s) com possível erro de digitação</strong><p>Encontrei datas ou valores que parecem digitados errado (ex.: ano trocado). Clique aqui ou veja a aba <strong>Alertas</strong> para conferir e corrigir na planilha.</p></div></div>` : ''}
       <div class="kpi-grid">${kpis}</div>
       ${metasCard}
       ${visaoDiaria}
@@ -2301,7 +2303,18 @@
   }
 
   function viewAlertas(main) {
-    main.innerHTML = card('Central de alertas', `<div class="alerta-list">${ALERTAS.map(alertaHtml).join('')}</div>`);
+    const cardErros = (M.suspeitos && M.suspeitos.length) ? card('<i class="bi bi-exclamation-triangle"></i> Possíveis erros de digitação na planilha', `
+        <p class="note">Encontrei ${M.suspeitos.length} lançamento(s) que parecem ter data ou valor digitado errado. Os que estão com data fora do período de operação foram excluídos dos cálculos; os demais continuam contando, mas vale conferir. Corrija na planilha e republique.</p>
+        <div class="table-wrap"><table><thead><tr><th>Data digitada</th><th>Descrição</th><th class="right">Valor</th><th>O que parece errado</th></tr></thead><tbody>
+        ${M.suspeitos.map(t => `<tr>
+          <td class="mono warn-text">${U.fmtDate(t.date)}</td>
+          <td>${U.esc(t.desc || '—')}</td>
+          <td class="mono right">${t.tipo === 'Entrada' ? '+' : '−'} ${U.brl(t.valor)}</td>
+          <td class="dim" style="font-size:12.5px">${U.esc(t._motivo || 'data fora do período')}</td>
+        </tr>`).join('')}
+        </tbody></table></div>
+        <p class="note">Dica: os erros de <strong>ano</strong> (ex.: 2012 no lugar de 2026) são os mais comuns — o dígito escapa na digitação. Procure a linha pela descrição e o valor na sua planilha, corrija a data e republique.</p>`) : '';
+    main.innerHTML = cardErros + card('Central de alertas', `<div class="alerta-list">${ALERTAS.map(alertaHtml).join('')}</div>`);
   }
 
   function alertaHtml(a) {
@@ -2316,11 +2329,6 @@
         <p class="note">Para atualização automática no GitHub Pages, salve a planilha como <code>Controle_Financeiro_Dubelato.xlsx</code> no repositório. Você também pode carregar manualmente pelo botão <strong>Planilha</strong> no menu.</p>`)}
       ${card('Abas reconhecidas', `<div class="table-wrap"><table><thead><tr><th>Aba</th><th>Interpretação</th></tr></thead><tbody>${abas}</tbody></table></div>`)}
       ${card('Tortelli / Celso', `<p class="note">Com a chave <strong>“Tortelli como investimento”</strong> (menu lateral) ligada, os pagamentos das categorias Tortelli e Celso saem do resultado operacional e passam a ser tratados como aporte/financiamento — o caixa continua refletindo tudo.</p>`)}
-      ${M.avisos.length ? card('Avisos de leitura', M.avisos.map(a => `<p class="note warn-text">${U.esc(a)}</p>`).join('')) : ''}
-      ${M.suspeitos.length ? card('Lançamentos com data suspeita (fora do período da operação)', `
-        <p class="note">Estes lançamentos têm ano provavelmente digitado errado e <strong>foram excluídos dos cálculos</strong>. Corrija a data na aba de origem e recarregue a planilha.</p>
-        <div class="table-wrap"><table><thead><tr><th>Data digitada</th><th>Descrição</th><th>Aba</th><th class="right">Valor</th></tr></thead><tbody>
-        ${M.suspeitos.map(t => `<tr><td class="mono warn-text">${U.fmtDate(t.date)}</td><td>${U.esc(t.desc)}</td><td><span class="chip">${U.esc(t.aba)}</span></td><td class="mono right">${t.tipo === 'Entrada' ? '+' : '−'} ${U.brl(t.valor)}</td></tr>`).join('')}
-        </tbody></table></div>`) : ''}`;
+      ${M.avisos.length ? card('Avisos de leitura', M.avisos.map(a => `<p class="note warn-text">${U.esc(a)}</p>`).join('')) : ''}`;
   }
 })();
