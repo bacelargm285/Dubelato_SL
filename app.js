@@ -438,8 +438,14 @@
     // SAÍDAS FIXAS RECORRENTES (salário, aluguel, luz, royalty, impostos…) no
     // dia típico do mês. Excluímos: boletos de matéria-prima (grupo cmv) e
     // financiamentos (Tortelli/Celso), que entram pela aba Boletos com data
-    // exata — evita dupla contagem e datas estimadas erradas.
-    const recorrentesFixos = (M.recorrentes || []).filter(r => r.grupo !== 'cmv' && r.grupo !== 'financiamento' && r.valorMedio >= 200);
+    // exata; pagamento de fatura de cartão (embute despesas já contadas em
+    // outras categorias); e adiantamentos de salário (antecipam a folha que já
+    // está contada) — tudo isso evita contar o mesmo dinheiro duas vezes.
+    const ehPassThrough = r => {
+      const d = U.norm(r.desc);
+      return /cartao de credito|^cartao$|fatura|adiantament/.test(d);
+    };
+    const recorrentesFixos = (M.recorrentes || []).filter(r => r.grupo !== 'cmv' && r.grupo !== 'financiamento' && r.valorMedio >= 200 && !ehPassThrough(r));
     const gruposDesc = { financiamento: 'Financiamento', fixos: 'Aluguel/fixos', folha: 'Folha', impostos: 'Impostos', marketing: 'Marketing', outros: 'Outros' };
     function eventosRecorrentesNoMes(ano, mes) {
       const diasNoMes = new Date(ano, mes + 1, 0).getDate();
@@ -478,6 +484,11 @@
       // fallback: venda média por dia da semana dos últimos 60 dias de lançamentos
       return vendaMediaDiaSemana(dia.getDay());
     }
+    // data em que a agenda de recebíveis de crédito da Getnet termina; depois
+    // dela, o crédito não pára de entrar — apenas deixamos de ter a agenda
+    // exata, então estimamos pela venda prevista (crédito cai ~D+1 na cessão).
+    const ultRecebivel = eventos.filter(e => e.tipo === 'receb').reduce((max, e) => (e.data > max ? e.data : max), hoje);
+
     const projSerie = [];
     let saldoP = saldoHoje;
     let entradaVendaTotal = 0;
@@ -490,7 +501,10 @@
       const entradaDebito = vendaOntem * mix.debito * (1 - (mix.taxaDebito || 0.009));
       const entradaPix = venda * mix.pix;
       const entradaDinheiro = venda * dinheiroPct;
-      const entradaDia = entradaDebito + entradaPix + entradaDinheiro;
+      // crédito: enquanto a agenda Getnet cobre, ele vem pelos eventos 'receb';
+      // depois disso, estimamos pela venda do dia anterior (antecipação ~D+1)
+      const entradaCredito = dia > ultRecebivel ? vendaOntem * mix.credito * (1 - (mix.taxaCredito || 0.014)) : 0;
+      const entradaDia = entradaDebito + entradaPix + entradaDinheiro + entradaCredito;
       entradaVendaTotal += entradaDia;
       saldoP += entradaDia;
       for (const e of eventos) if (e.data.getFullYear() === dia.getFullYear() && e.data.getMonth() === dia.getMonth() && e.data.getDate() === dia.getDate()) saldoP += e.valor;
@@ -514,6 +528,53 @@
       : `<div class="alerta ok"><i class="bi bi-check-circle"></i><div><strong>Caixa projetado positivo</strong><p>Com o saldo atual, a venda diária estimada e o que já está agendado, a conta se mantém positiva nos próximos 90 dias.</p></div></div>`;
     const temPrevisao = !!(CLIMA && CLIMA.previsaoDemanda);
 
+    // ===== ANÁLISE NARRATIVA AUTOMÁTICA DA PROJEÇÃO =====
+    // Lê a série projetada e explica em português por que o caixa sobe e desce,
+    // apontando o(s) vale(s) e o custo do período crítico.
+    const narrativa = (() => {
+      if (!projSerie.length) return '';
+      // saldo por mês projetado: pico e vale de cada mês
+      const porMesProj = {};
+      for (const p of projSerie) {
+        const k = U.ymKey(p.data);
+        const m = porMesProj[k] || (porMesProj[k] = { mes: k, min: Infinity, max: -Infinity, minData: null, maxData: null, fimSaldo: 0 });
+        if (p.saldo < m.min) { m.min = p.saldo; m.minData = p.data; }
+        if (p.saldo > m.max) { m.max = p.saldo; m.maxData = p.data; }
+        m.fimSaldo = p.saldo;
+      }
+      const meses = Object.values(porMesProj);
+      // vale global (pior momento)
+      const vale = projSerie.reduce((a, b) => (b.saldo < a.saldo ? b : a));
+      const pico = projSerie.reduce((a, b) => (b.saldo > a.saldo ? b : a));
+      // custos fixos que caem na 1ª quinzena (o que causa a queda) — um de cada tipo
+      const fixosQ1 = eventos.filter(e => e.tipo === 'fixo' && e.data.getDate() <= 12);
+      const porDesc = {};
+      for (const e of fixosQ1) {
+        const chave = U.norm((e.desc || '').replace(/\d+/g, '')).trim();
+        if (!porDesc[chave] || Math.abs(e.valor) > Math.abs(porDesc[chave].valor)) porDesc[chave] = e;
+      }
+      const fixosUnicos = Object.values(porDesc).sort((a, b) => Math.abs(b.valor) - Math.abs(a.valor));
+      const top3 = fixosUnicos.slice(0, 4).map(e => U.esc((e.desc || '').split(/\s+/).slice(0, 2).join(' ')) + ' (~dia ' + e.data.getDate() + ', ' + U.brl(Math.abs(e.valor)) + ')');
+      // custo médio da 1ª quinzena por mês (soma total ÷ nº de meses no horizonte)
+      const custoQuinzena1Mes = U.sum(eventos.filter(e => e.tipo === 'fixo' && e.data.getDate() <= 12), e => Math.abs(e.valor)) / Math.max(1, meses.length);
+
+      // mês do vale
+      const mesVale = vale.data.toLocaleDateString('pt-BR', { month: 'long' });
+      const partes = [];
+      partes.push(`<strong>Por que o caixa oscila assim?</strong> O gráfico tem esse formato de "dente de serra" porque, todo mês, a maior parte dos custos fixos sai concentrada na <strong>primeira quinzena</strong> — enquanto as vendas entram diluídas ao longo dos 30 dias. Então o saldo despenca no começo de cada mês e vai se recuperando conforme as vendas pingam no caixa.`);
+      if (top3.length) {
+        partes.push(`Os grandes responsáveis pela queda no início do mês são ${top3.slice(0, 3).join(', ')}${top3.length > 3 ? ' e outros' : ''} — juntos, cerca de ${U.brl(custoQuinzena1Mes)} saem já nos primeiros dias.`);
+      }
+      // ponto mais crítico
+      if (vale.saldo < 5000) {
+        partes.push(`O momento mais apertado da projeção é por volta de <strong>${U.fmtDate(vale.data)}</strong>, quando o saldo chega ao menor ponto (${U.brl(vale.saldo)})${vale.saldo < 0 ? ' — ficando negativo, ou seja, faltaria dinheiro para cobrir tudo naquela data' : ' — perigosamente baixo'}. Esse fundo do vale acontece logo depois dos pagamentos fixos de ${mesVale}, antes das vendas do mês recomporem o caixa.`);
+      } else {
+        partes.push(`O ponto mais baixo da projeção é em <strong>${U.fmtDate(vale.data)}</strong> (${U.brl(vale.saldo)}), mas ainda dentro de uma margem segura.`);
+      }
+      partes.push(`Depois de cada fundo, a linha volta a subir porque as vendas de débito, PIX e dinheiro continuam entrando todo dia. O recado para os sócios é simples: <strong>entrar em cada mês com caixa reforçado até o dia 10</strong>, que é quando o aperto é maior. Nos dias mais críticos, dá para suavizar antecipando um recebível ou empurrando um boleto grande para depois do vale.`);
+      return partes.map(p => `<p>${p}</p>`).join('');
+    })();
+
     main.innerHTML = `
       <div class="kpi-grid kpi-grid-4">
         ${kpiCard({ icon: 'bi-safe2', label: A.saldoExato ? 'Saldo real na conta' : 'Saldo (movimento acumulado)', valor: U.brl(saldoHoje), sub: A.saldoExato ? 'em ' + U.fmtDate(dataSaldo) + ' (extrato)' : 'reimporte o OFX para o saldo exato' })}
@@ -522,6 +583,7 @@
         ${kpiCard({ icon: 'bi-calendar-check', label: 'Saídas fixas / mês', valor: U.brl(totalFixos / 3), sub: 'salário, aluguel, luz, impostos…' })}
       </div>
       ${card('Saldo real na conta × projeção dos próximos 90 dias', '<div class="chart-box tall"><canvas id="ch-fluxo-real"></canvas></div><p class="note">A linha cheia é o saldo que <strong>de fato</strong> esteve na conta (extrato Santander). A pontilhada projeta a partir de hoje: <strong>+</strong> venda diária em débito, PIX e dinheiro' + (temPrevisao ? ' (previsão clima × calendário)' : ' (média por dia da semana)') + ' e recebíveis de crédito da Getnet; <strong>−</strong> as saídas fixas recorrentes no dia típico de cada uma e os boletos que vencem.</p>')}
+      ${card('<i class="bi bi-chat-square-text"></i> Entendendo o gráfico — para os sócios', `<div class="resumo">${narrativa}</div>`)}
       ${status}
       ${card('Calendário de custos do mês — quando o caixa aperta', `
         <p class="note" style="margin-top:0">As saídas fixas não se distribuem por igual no mês. Veja onde precisa ter mais dinheiro em caixa:</p>
