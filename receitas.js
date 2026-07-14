@@ -16,6 +16,11 @@ DB.receitas = (function () {
   // estoque de produção controlado — não bloqueiam a produção por padrão.
   const FRESCOS = /abacaxi|amora|ameixa|banana|cenoura|framboesa|goiaba|gengibre|hortela|laranja|lim(a|ã)o|mam(a|ã)o|manga|marolo|morango|maracuj|abacate|coco fresco|figo|melancia|melao|uva|caju fruta|pessego|kiwi|caqui|jabuticaba|frutas vermelhas/i;
 
+  // Insumos básicos de compra semanal garantida (leite, água, açúcar comum) —
+  // a loja sempre tem, não são controlados item a item no estoque de produção.
+  // NÃO inclui ingredientes especiais (ovomaltine, maltovo, pastas, etc).
+  const BASICOS = /leite integral|leite fresco|^leite$|^agua$|^água$|sacarose|acucar refinado|açúcar refinado|acucar cristal|açúcar cristal|^sal$/i;
+
   /** Constrói o índice de receitas a partir das linhas da aba Sabores_Receitas */
   function build(linhasReceitas) {
     if (!linhasReceitas || !linhasReceitas.length) return null;
@@ -29,22 +34,61 @@ DB.receitas = (function () {
     return { sabores: Object.values(sabores), porNome: sabores };
   }
 
-  /** Normaliza para casar nomes de ingrediente entre receita e estoque */
-  function n(s) { return U.norm(s).replace(/\d+%?|de|em|po|pó|fresco|integral|kg|g\b/g, ' ').replace(/\s+/g, ' ').trim(); }
+  /** Normaliza para casar nomes — mantém as palavras que DISTINGUEM os
+   *  ingredientes (fresco, pó, em) porque "Leite Fresco" ≠ "Leite em pó". */
+  function n(s) {
+    return U.norm(s)
+      .replace(/[0-9]+\s*%?/g, ' ')            // remove números e %
+      .replace(/\b(kg|g|ml|l|gramas?|un)\b/g, ' ') // unidades
+      .replace(/\s+/g, ' ').trim();
+  }
 
-  /** Casa um ingrediente da receita com um item do estoque (exato → contido → palavra-chave) */
+  // palavras muito genéricas que sozinhas não bastam para casar
+  const GENERICAS = new Set(['de', 'em', 'com', 'e', 'do', 'da', 'leite', 'creme', 'base', 'pasta', 'po', 'pó', 'acucar', 'chocolate', 'choc']);
+
+  // similaridade simples entre duas strings (Dice bigrams) para pegar erros de digitação
+  function similar(a, b) {
+    if (a === b) return 1;
+    if (a.length < 2 || b.length < 2) return 0;
+    const bg = s => { const m = {}; for (let i = 0; i < s.length - 1; i++) { const g = s.slice(i, i + 2); m[g] = (m[g] || 0) + 1; } return m; };
+    const A = bg(a), B = bg(b);
+    let inter = 0, total = 0;
+    for (const g in A) { total += A[g]; if (B[g]) inter += Math.min(A[g], B[g]); }
+    for (const g in B) total += B[g];
+    return total ? (2 * inter) / total : 0;
+  }
+
+  /** Casa um ingrediente da receita com um item do estoque.
+   *  Exige casamento FORTE: nome igual, um contém o outro por inteiro, todas as
+   *  palavras significativas presentes, ou alta similaridade (erro de digitação).
+   *  Retorna null quando não há match confiável — melhor não casar do que casar errado. */
   function casarIngrediente(ing, estoqueIndex) {
     const ni = n(ing);
     if (!ni) return null;
+    // 1. exato
     if (estoqueIndex.exato[ni]) return estoqueIndex.exato[ni];
+    // 2. um contém o outro por inteiro (frase completa), com tamanho mínimo
     for (const it of estoqueIndex.lista) {
-      if (ni.length > 3 && (it.norm.includes(ni) || ni.includes(it.norm))) return it;
+      if (ni.length >= 4 && it.norm.length >= 4 && (it.norm === ni || (' ' + it.norm + ' ').includes(' ' + ni + ' ') || (' ' + ni + ' ').includes(' ' + it.norm + ' '))) return it;
     }
-    // palavra significativa em comum
-    const palavras = ni.split(' ').filter(p => p.length > 3);
+    // 3. todas as palavras significativas da receita estão no item (ou vice-versa)
+    const palR = ni.split(' ').filter(p => p.length > 2 && !GENERICAS.has(p));
+    if (palR.length) {
+      for (const it of estoqueIndex.lista) {
+        const palI = it.norm.split(' ').filter(p => p.length > 2 && !GENERICAS.has(p));
+        if (!palI.length) continue;
+        const todasR = palR.every(p => it.norm.includes(p));
+        const todasI = palI.every(p => ni.includes(p));
+        if (todasR || todasI) return it;
+      }
+    }
+    // 4. similaridade alta (erro de digitação, ex.: Ovomaltine ↔ Ovomaline)
+    let melhor = null, melhorSim = 0;
     for (const it of estoqueIndex.lista) {
-      for (const p of palavras) if (it.norm.includes(p)) return it;
+      const s = similar(ni, it.norm);
+      if (s > melhorSim) { melhorSim = s; melhor = it; }
     }
+    if (melhorSim >= 0.68) return melhor;
     return null;
   }
 
@@ -74,29 +118,35 @@ DB.receitas = (function () {
     const resultado = recs.sabores.map(s => {
       const ingredientes = s.ingredientes.map(ing => {
         const fresco = FRESCOS.test(ing.nome);
+        const basico = BASICOS.test(U.norm(ing.nome));
         const item = casarIngrediente(ing.nome, idx);
         let status;
-        if (fresco) status = 'fresco';                              // comprado na hora, não bloqueia
-        else if (!item) status = 'nao_controlado';                 // não achei no estoque
-        else if (item.qt == null) status = 'sem_qtd';              // no estoque mas sem quantidade
-        else if (item.qt <= 0) status = 'faltando';                // zerado
-        else status = 'ok';
-        return { nome: ing.nome, qtd: ing.qtd, fresco, item: item ? item.item : null, estoque: item ? item.qt : null, status };
+        if (item && item.qt != null && item.qt > 0) status = 'ok';       // achei e tem no estoque
+        else if (item && item.qt != null && item.qt <= 0) status = 'faltando'; // achei e está zerado
+        else if (item && item.qt == null) status = 'sem_qtd';            // achei mas sem quantidade informada
+        else if (basico) status = 'basico';                              // leite/açúcar/água: compra semanal, sempre tem
+        else if (fresco) status = 'fresco';                              // fruta de feira: compra na hora
+        else status = 'verificar';                                       // não achei no estoque — precisa conferir
+        return { nome: ing.nome, qtd: ing.qtd, fresco, basico, item: item ? item.item : null, estoque: item ? item.qt : null, status };
       });
 
       const faltando = ingredientes.filter(i => i.status === 'faltando');
-      const naoControlado = ingredientes.filter(i => i.status === 'nao_controlado');
+      const verificar = ingredientes.filter(i => i.status === 'verificar');
+      const semQtd = ingredientes.filter(i => i.status === 'sem_qtd');
       const frescos = ingredientes.filter(i => i.status === 'fresco');
-      // pode produzir se nenhum ingrediente controlado está zerado
-      const podeProduzir = faltando.length === 0;
-      // confiança: alta se todos os controlados têm quantidade; média se há itens sem controle
+      const basicos = ingredientes.filter(i => i.status === 'basico');
+      // pode produzir SÓ se nada está zerado E nada está sem controle (verificar).
+      // Ingrediente que não achei no estoque agora BLOQUEIA — melhor avisar que
+      // liberar errado (ex.: Ovomaltine/Maltovo que não estão no estoque).
+      const podeProduzir = faltando.length === 0 && verificar.length === 0;
       const vol = volumePorSabor[U.norm(s.nome)] || 0;
       const nuncaFeito = vol === 0;
 
       return {
         nome: s.nome, tipo: s.tipo,
         ingredientes, podeProduzir,
-        faltando, naoControlado, frescos,
+        faltando, verificar, semQtd, frescos,
+        naoControlado: verificar, // alias para compatibilidade
         volume: vol, nuncaFeito,
         popularidade: vol / maxVol,
       };
@@ -104,7 +154,7 @@ DB.receitas = (function () {
 
     // ordena: pode produzir primeiro, dentro disso por popularidade
     const produziveis = resultado.filter(r => r.podeProduzir).sort((a, b) => b.volume - a.volume);
-    const bloqueados = resultado.filter(r => !r.podeProduzir).sort((a, b) => a.faltando.length - b.faltando.length);
+    const bloqueados = resultado.filter(r => !r.podeProduzir).sort((a, b) => (a.faltando.length + a.verificar.length) - (b.faltando.length + b.verificar.length));
     const nuncaFeitos = produziveis.filter(r => r.nuncaFeito);
 
     return {

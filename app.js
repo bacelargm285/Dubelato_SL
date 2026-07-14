@@ -1699,9 +1699,10 @@
     };
     const infoIngredientes = r => {
       const partes = [];
-      if (r.naoControlado.length) partes.push(`${r.naoControlado.length} não controlado(s) no estoque`);
-      if (r.frescos.length) partes.push(`${r.frescos.length} fruta(s) fresca(s)`);
-      return partes.length ? `<span class="dim">${partes.join(' · ')}</span>` : '';
+      if (r.verificar.length) partes.push(`<span class="neg">${r.verificar.length} fora do estoque</span>`);
+      if (r.frescos.length) partes.push(`<span class="dim">${r.frescos.length} fruta(s) fresca(s)</span>`);
+      if (r.semQtd.length) partes.push(`<span class="dim">${r.semQtd.length} sem qtd</span>`);
+      return partes.length ? partes.join(' · ') : '<span class="dim">tudo em estoque</span>';
     };
 
     // KPIs
@@ -1743,15 +1744,16 @@
       </div>`) : '';
 
     // bloqueados
-    const cardBloq = bloqueados.length ? card('Bloqueados — falta ingrediente no estoque', `
+    const cardBloq = bloqueados.length ? card('Bloqueados — falta ingrediente', `
       <div class="table-wrap"><table>
-        <thead><tr><th>Sabor</th><th>Tipo</th><th>Ingredientes em falta</th></tr></thead>
-        <tbody>${bloqueados.slice(0, 40).map(r => `<tr>
+        <thead><tr><th>Sabor</th><th>Tipo</th><th>Zerado no estoque</th><th>Fora do estoque (conferir)</th></tr></thead>
+        <tbody>${bloqueados.slice(0, 50).map(r => `<tr>
           <td><strong>${U.esc(r.nome)}</strong></td>
           <td class="dim">${U.esc(r.tipo)}</td>
-          <td class="neg">${r.faltando.map(f => U.esc(f.item || f.nome)).join(', ')}</td>
+          <td class="neg">${r.faltando.length ? r.faltando.map(f => U.esc(f.item || f.nome)).join(', ') : '<span class="dim">—</span>'}</td>
+          <td class="warn-text">${r.verificar.length ? r.verificar.map(f => U.esc(f.nome)).join(', ') : '<span class="dim">—</span>'}</td>
         </tr>`).join('')}</tbody></table></div>
-      <p class="note">Comprando esses itens, você libera a produção destes sabores. Ingredientes marcados aqui são os que estão zerados no estoque de produção.</p>`) : '';
+      <p class="note"><strong>Zerado no estoque</strong> = o item existe no seu controle mas está em 0, é só repor. <strong>Fora do estoque</strong> = não encontrei esse ingrediente no seu estoque de produção — pode ser que você compre à parte, ou que o nome esteja diferente na planilha. Confira esses antes de produzir; por segurança o sistema não libera o sabor enquanto houver ingrediente fora do controle.</p>`) : '';
 
     main.innerHTML = `
       ${card('Produção possível — o que dá para fazer com o estoque de hoje', `
@@ -1760,7 +1762,7 @@
       ${card('Sabores que dá para produzir agora', filtroBtns + tabelaProduziveis)}
       ${cardNunca}
       ${cardBloq}
-      ${card('Como isto é calculado', `<p class="note">Para cada receita, o sistema casa os ingredientes com o estoque (mesmo com nomes um pouco diferentes, tipo "Base 6 MEC 3" e "Base 6"). Um sabor é <strong>produzível</strong> quando nenhum ingrediente controlado está zerado. Frutas frescas (morango, abacaxi, limão…) são tratadas como compra do dia e não bloqueiam. <strong>Em breve:</strong> quando você preencher os preços no estoque e nas receitas, esta aba vai rankear os sabores por <strong>custo e margem</strong> — mostrando os mais lucrativos para priorizar no fim de semana.</p>`)}`;
+      ${card('Como isto é calculado', `<p class="note">Para cada receita, o sistema casa os ingredientes com o seu estoque, tolerando nomes um pouco diferentes (tipo "Base 6 MEC 3" ↔ "Base 6", ou "Ovomaltine" ↔ "Ovomaline"). Um sabor só é <strong>produzível</strong> quando todos os ingredientes de produção estão disponíveis. Se um ingrediente está <strong>zerado</strong> ou <strong>não aparece no seu estoque</strong>, o sabor fica bloqueado — melhor avisar que liberar errado. Só não travam a produção: <strong>frutas frescas</strong> (morango, abacaxi, limão…), que você compra na feira, e os <strong>básicos de compra semanal</strong> (leite, açúcar, água). <strong>Em breve:</strong> quando você preencher os preços no estoque e nas receitas, esta aba vai rankear os sabores por <strong>custo e margem</strong>, mostrando os mais lucrativos para priorizar no fim de semana.</p>`)}`;
 
     // liga os filtros de tipo
     main.querySelectorAll('.chip-btn[data-tipo]').forEach(b => b.addEventListener('click', () => {
