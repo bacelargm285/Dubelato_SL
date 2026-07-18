@@ -1618,17 +1618,57 @@
     }
   }
 
+  async function processarOfx(files) {
+    const status = $('#banco-status');
+    const setStatus = t => { if (status) status.textContent = t; };
+    setStatus('Lendo ' + files.length + ' arquivo(s)...');
+    try {
+      let algum = false;
+      const arquivosVazios = [];
+      for (const f of files) {
+        const buf = await f.arrayBuffer();
+        let novos = [];
+        try { novos = DB.banco.parseOfx(buf); } catch (e) { novos = []; }
+        if (novos.length) { BANCO = DB.banco.mesclar(BANCO, novos); algum = true; }
+        else arquivosVazios.push(f.name);
+      }
+      if (!algum) {
+        setStatus('');
+        alert('Nao consegui ler lancamentos nesse(s) arquivo(s). Confira se e o extrato em formato OFX (Santander Empresas -> Extrato -> Exportar -> OFX). PDF ou imagem nao funcionam aqui.');
+        return;
+      }
+      DB.banco.salvar(BANCO);
+      BAN = DB.banco.analisar(BANCO, GETNET, M);
+      FLUXO_RESUMO = null;
+      setStatus('');
+      render();
+      if (arquivosVazios.length) {
+        setTimeout(() => alert('Carreguei ' + BANCO.txs.length + ' lancamentos no total. Estes nao foram lidos (talvez nao sejam OFX): ' + arquivosVazios.join(', ')), 100);
+      }
+    } catch (err) {
+      console.error(err);
+      setStatus('');
+      alert('Erro ao ler o extrato: ' + (err && err.message ? err.message : err));
+    }
+  }
+
   function ligarUploadBanco() {
     const btn = $('#btn-banco-up');
     if (!btn) return;
     let inp = $('#banco-file-input');
     if (!inp) {
       inp = document.createElement('input');
-      inp.type = 'file'; inp.accept = '.ofx'; inp.multiple = true; inp.hidden = true; inp.id = 'banco-file-input';
+      inp.type = 'file';
+      inp.setAttribute('accept', '.ofx,.OFX,application/x-ofx,text/plain,*/*');
+      inp.multiple = true; inp.hidden = true; inp.id = 'banco-file-input';
       document.body.appendChild(inp);
-      inp.addEventListener('change', e => { if (e.target.files.length) processarOfx([...e.target.files]); inp.value = ''; });
+      inp.addEventListener('change', e => {
+        const arquivos = [...e.target.files];
+        inp.value = '';
+        if (arquivos.length) processarOfx(arquivos);
+      });
     }
-    btn.addEventListener('click', () => inp.click());
+    btn.onclick = () => inp.click();
   }
 
   /* ---------- PRODUÇÃO DE CUBAS ---------- */
