@@ -202,47 +202,60 @@ DB.banco = (function () {
     // intervalo em que as DUAS fontes se sobrepõem, o total líquido de crédito
     // vendido com o total efetivamente antecipado. Como as bordas cortam vendas
     // sem depósito (e vice-versa), apresentamos uma FAIXA honesta: o melhor
-    // casamento (bloco interior) dá o piso; o agregado bruto dá o teto.
+    // CUSTO DA ANTECIPAÇÃO. Compara, MÊS A MÊS, o líquido de crédito que a
+    // Getnet apurou (o que você receberia em ~30 dias) com o que efetivamente
+    // caiu na conta como antecipação (OFX). Só usa meses em que AS DUAS fontes
+    // têm cobertura boa — assim funciona com 1 ou vários extratos, sem inflar
+    // por sobreposição de períodos desalinhados.
     A.custoAntecipacao = null;
     if (getnet && getnet.cartoes && getnet.cartoes.length && A.antecipacaoTotal > 0) {
       const cred = getnet.cartoes.filter(c => c.modalidade === 'Crédito');
-      const liqCredTotal = U.sum(cred, c => c.liquido);
-      const iniV = new Date(Math.min(...cred.map(c => +c.data)));
-      const fimV = new Date(Math.max(...cred.map(c => +c.data)));
-      // sobreposição das duas fontes
-      const de = new Date(Math.max(+ini, +iniV)), ate = new Date(Math.min(+fim, +fimV));
-      const dentro = (d, a, b) => d >= a && d <= b;
-      const liqCredSobrep = U.sum(cred.filter(c => dentro(c.data, de, ate)), c => c.liquido);
-      const antSobrep = U.sum(A.antecipacoes.filter(t => dentro(t.data, de, ate)), t => t.valor);
-      if (liqCredSobrep > 1000 && antSobrep > 1000) {
-        // razão agregada na sobreposição (teto do deságio) e no bloco interior (piso)
-        const desagioAgregado = Math.max(0, (1 - antSobrep / liqCredSobrep) * 100);
-        // bloco interior: recorta 4 dias de cada borda
-        const bi = new Date(+de + 4 * 86400000), bf = new Date(+ate - 4 * 86400000);
-        let vB = 0, aB = 0;
-        if (bf - bi >= 10 * 86400000) {
-          vB = U.sum(cred.filter(c => dentro(c.data, bi, bf)), c => c.liquido);
-          aB = U.sum(A.antecipacoes.filter(t => dentro(t.data, bi, bf)), t => t.valor);
+      const cobertura = itens => {
+        const porMes = {};
+        for (const it of itens) {
+          const k = U.ymKey(it.data), d = it.data.getDate();
+          const c = porMes[k] || (porMes[k] = { min: 31, max: 1 });
+          c.min = Math.min(c.min, d); c.max = Math.max(c.max, d);
         }
-        const desagioInterior = (vB > 1000 && aB > 1000) ? Math.max(0, (1 - aB / vB) * 100) : desagioAgregado;
-        const pisoP = Math.min(desagioAgregado, desagioInterior);
-        const tetoP = Math.max(desagioAgregado, desagioInterior);
-        const centro = (pisoP + tetoP) / 2;
-        const diasSobrep = Math.round((ate - de) / 86400000) + 1;
-        const liqCredMes = liqCredSobrep / diasSobrep * 30;
+        return porMes;
+      };
+      const covV = cobertura(cred), covA = cobertura(A.antecipacoes);
+      const liqPorMes = {}, brutoPorMes = {}, antPorMes = {};
+      for (const c of cred) { liqPorMes[U.ymKey(c.data)] = (liqPorMes[U.ymKey(c.data)] || 0) + c.liquido; brutoPorMes[U.ymKey(c.data)] = (brutoPorMes[U.ymKey(c.data)] || 0) + c.bruto; }
+      for (const t of A.antecipacoes) antPorMes[U.ymKey(t.data)] = (antPorMes[U.ymKey(t.data)] || 0) + t.valor;
+
+      // meses válidos: as duas fontes cobrem o mês quase inteiro
+      const mesesValidos = [];
+      for (const k of Object.keys(liqPorMes)) {
+        const [yy, mm] = k.split('-').map(Number);
+        const diasNoMes = new Date(yy, mm, 0).getDate();
+        const cv = covV[k], ca = covA[k];
+        const vOk = cv && cv.min <= 4 && cv.max >= diasNoMes - 4;
+        const aOk = ca && ca.min <= 5 && ca.max >= diasNoMes - 5;
+        if (vOk && aOk && liqPorMes[k] > 1000 && (antPorMes[k] || 0) > 1000) mesesValidos.push(k);
+      }
+
+      if (mesesValidos.length) {
+        // soma dos meses casados — comparação justa, mesmo período dos dois lados
+        const liqTotal = U.sum(mesesValidos, k => liqPorMes[k]);
+        const brutoTotal = U.sum(mesesValidos, k => brutoPorMes[k]);
+        const antTotal = U.sum(mesesValidos, k => antPorMes[k]);
+        const custoTotal = Math.max(0, liqTotal - antTotal);
+        const desagio = liqTotal > 0 ? (custoTotal / liqTotal) * 100 : 0;
+        const liqCredMes = liqTotal / mesesValidos.length;
         A.custoAntecipacao = {
-          desagioPct: centro, faixaMin: pisoP, faixaMax: tetoP,
-          custoMensalEst: liqCredMes * centro / 100,
-          custoMensalMin: liqCredMes * pisoP / 100,
-          custoMensalMax: liqCredMes * tetoP / 100,
-          liqCredMes, diasSobrep,
-          bloco: { de, ate },
-          // comparação lado a lado no período de sobreposição:
-          brutoCredito: U.sum(cred.filter(c => dentro(c.data, de, ate)), c => c.bruto),
-          liquidoSemAntecipacao: liqCredSobrep,   // o que a Getnet pagaria em D+30 (já sem a taxa da maquininha)
-          recebidoComAntecipacao: antSobrep,      // o que caiu na conta agora, via antecipação (OFX)
-          custoNoPeriodo: liqCredSobrep - antSobrep,
+          desagioPct: desagio,
+          custoMensalEst: custoTotal / mesesValidos.length,
+          liqCredMes,
+          mesesUsados: mesesValidos.sort(),
+          brutoCredito: brutoTotal,
+          liquidoSemAntecipacao: liqTotal,
+          recebidoComAntecipacao: antTotal,
+          custoNoPeriodo: custoTotal,
         };
+      } else {
+        // ainda não há mês fechado dos dois lados — sinaliza sem número falso
+        A.custoAntecipacao = { indisponivel: true };
       }
     }
 

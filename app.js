@@ -105,21 +105,6 @@
     // busca a versão publicada no repositório (visível para todos os sócios)
     // abas que dependem de banco/getnet e devem se redesenhar quando os dados publicados chegam
     const VIEWS_DADOS = ['getnet', 'banco', 'antecipacao', 'fluxo', 'dashboard'];
-    DB.getnet.carregarPublicado().then(pub => {
-      if (!pub) return;
-      const localMaisNovo = GETNET?.atualizadoEm && pub.atualizadoEm && GETNET.atualizadoEm > pub.atualizadoEm;
-      GETNET = localMaisNovo ? DB.getnet.mesclar(pub, GETNET) : (GETNET ? DB.getnet.mesclar(GETNET, pub) : pub);
-      GAN = DB.getnet.analisar(GETNET, M);
-      BAN = BANCO ? DB.banco.analisar(BANCO, GETNET, M) : BAN;
-      if (VIEWS_DADOS.includes(viewAtual)) render();
-    });
-    DB.banco.carregarPublicado().then(pub => {
-      if (!pub) return;
-      const localMaisNovo = BANCO?.atualizadoEm && pub.atualizadoEm && BANCO.atualizadoEm > pub.atualizadoEm;
-      BANCO = localMaisNovo ? DB.banco.mesclar(pub, BANCO.txs) : (BANCO ? DB.banco.mesclar(BANCO, pub.txs) : pub);
-      BAN = DB.banco.analisar(BANCO, GETNET, M);
-      if (VIEWS_DADOS.includes(viewAtual)) render();
-    });
     ALERTAS = DB.alerts.run(M, INV);
     montarFiltroMes();
     atualizarBadgeAlertas();
@@ -1517,30 +1502,6 @@
 
   /* ---------- BANCO (extrato OFX) ---------- */
 
-  async function processarOfx(files) {
-    const status = $('#banco-status');
-    if (status) status.textContent = 'Lendo extrato…';
-    try {
-      let novos = [];
-      for (const f of files) {
-        const buf = await f.arrayBuffer();
-        novos.push(...DB.banco.parseOfx(buf));
-      }
-      if (!novos.length) {
-        alert('Não encontrei lançamentos nesse arquivo. Exporte o extrato em formato OFX pelo app do Santander Empresas.');
-        if (status) status.textContent = '';
-        return;
-      }
-      BANCO = DB.banco.mesclar(BANCO, novos);
-      DB.banco.salvar(BANCO);
-      BAN = DB.banco.analisar(BANCO, GETNET, M);
-      render();
-    } catch (err) {
-      console.error(err);
-      alert('Erro ao ler o extrato: ' + err.message);
-      if (status) status.textContent = '';
-    }
-  }
 
   function viewBanco(main) {
     const uploader = `
@@ -1571,15 +1532,6 @@
       ${kpiCard({ icon: 'bi-percent', label: 'Tarifas bancárias', valor: U.brl(A.tarifas.total), sub: 'no período · ' + dias + ' dias', invert: true })}
     </div>`;
 
-    // custo da antecipação — resumo (detalhe completo na aba Antecipação)
-    let antecCard = '';
-    if (A.custoAntecipacao) {
-      const c = A.custoAntecipacao;
-      antecCard = `<div class="alerta ${c.desagioPct > 2 ? 'warn' : 'ok'}"><i class="bi bi-cash-coin"></i><div>
-        <strong>Antecipação de crédito custa ~${U.pct(c.desagioPct)} (≈ ${U.brl(c.custoMensalEst)}/mês)</strong>
-        <p>Você recebeu ${U.brl(c.recebidoComAntecipacao)} à vista pela antecipação; sem antecipar, receberia ${U.brl(c.liquidoSemAntecipacao)} em ~30 dias — diferença de ${U.brl(c.custoNoPeriodo)} no período. A comparação visual e o custo mês a mês estão na aba <strong>Antecipação</strong>.</p>
-      </div></div>`;
-    }
 
     // composição por categoria
     const cats = Object.values(A.porCat).sort((a, b) => b.total - a.total);
@@ -1611,6 +1563,22 @@
         </div>
         <div class="table-wrap"><table><thead><tr><th>Vencimento</th><th>Boleto (planilha)</th><th class="right">Valor</th><th>Status no banco</th></tr></thead><tbody>${rowsConc}</tbody></table></div>
         <p class="note">Casa cada boleto da planilha (vencido no período do extrato) com o débito correspondente na conta, por valor e data (±5 dias). "Não encontrado" pode ser boleto pago em dinheiro, valor divergente, ou lançamento faltando.</p>`);
+    }
+
+    // custo da antecipação — resumo (detalhe completo na aba Antecipação)
+    let antecCard = '';
+    if (A.custoAntecipacao && A.custoAntecipacao.indisponivel) {
+      antecCard = `<div class="alerta"><i class="bi bi-hourglass-split"></i><div>
+        <strong>Custo da antecipação: aguardando um mês fechado</strong>
+        <p>Para calcular o custo com precisão, preciso da Getnet e do extrato bancário cobrindo o mesmo mês inteiro. Assim que houver, o número aparece aqui e na aba <strong>Antecipação</strong>.</p>
+      </div></div>`;
+    } else if (A.custoAntecipacao) {
+      const c = A.custoAntecipacao;
+      const nMeses = c.mesesUsados ? c.mesesUsados.length : 1;
+      antecCard = `<div class="alerta ${c.desagioPct > 2 ? 'warn' : 'ok'}"><i class="bi bi-cash-coin"></i><div>
+        <strong>Antecipação de crédito custa ~${U.pct(c.desagioPct)} (≈ ${U.brl(c.custoMensalEst)}/mês)</strong>
+        <p>Em ${nMeses} ${nMeses === 1 ? 'mês fechado' : 'meses fechados'}, você recebeu ${U.brl(c.recebidoComAntecipacao)} à vista pela antecipação; sem antecipar, receberia ${U.brl(c.liquidoSemAntecipacao)} em ~30 dias — diferença de ${U.brl(c.custoNoPeriodo)}. A comparação visual e o custo mês a mês estão na aba <strong>Antecipação</strong>.</p>
+      </div></div>`;
     }
 
     main.innerHTML = `
@@ -2266,9 +2234,9 @@
   }
 
   function viewAntecipacao(main) {
-    if (!BAN || !BAN.custoAntecipacao) {
-      const falta = !BANCO ? 'o extrato bancário (aba Banco)' : !GETNET ? 'os dados da Getnet (aba Getnet)' : 'dados suficientes';
-      main.innerHTML = card('Custo da antecipação', `<p class="note">Esta análise cruza o que a Getnet apurou de crédito com o que caiu na conta pela antecipação. Falta carregar ${falta} para calcular. Assim que as duas fontes cobrirem o mesmo período, o custo mês a mês aparece aqui.</p>`);
+    if (!BAN || !BAN.custoAntecipacao || BAN.custoAntecipacao.indisponivel) {
+      const falta = !BANCO ? 'o extrato bancário (aba Banco)' : !GETNET ? 'os dados da Getnet (aba Getnet)' : 'um mês fechado com as duas fontes cobrindo o mesmo período';
+      main.innerHTML = card('Custo da antecipação', `<p class="note">Esta análise cruza o que a Getnet apurou de crédito com o que caiu na conta pela antecipação. ${!BANCO || !GETNET ? 'Falta carregar ' + falta + '.' : 'Falta ' + falta + '.'} Assim que houver, o custo mês a mês aparece aqui.</p>`);
       return;
     }
     const A = BAN, c = A.custoAntecipacao;
@@ -2316,12 +2284,12 @@
 
     main.innerHTML = `
       <div class="kpi-grid kpi-grid-4">
-        ${kpiCard({ icon: 'bi-cash-coin', label: 'Custo médio por mês', valor: U.brl(custoMedioMes), sub: completos.length ? completos.length + ' meses fechados' : 'estimativa', invert: true, cls: 'kpi-warn' })}
-        ${kpiCard({ icon: 'bi-percent', label: 'Deságio do crédito', valor: U.pct(c.desagioPct), sub: 'faixa ' + U.pct(c.faixaMin) + '–' + U.pct(c.faixaMax) })}
+        ${kpiCard({ icon: 'bi-cash-coin', label: 'Custo médio por mês', valor: U.brl(custoMedioMes), sub: (c.mesesUsados ? c.mesesUsados.length : completos.length) + ' meses fechados', invert: true, cls: 'kpi-warn' })}
+        ${kpiCard({ icon: 'bi-percent', label: 'Deságio do crédito', valor: U.pct(c.desagioPct), sub: 'sobre o crédito antecipado' })}
         ${kpiCard({ icon: 'bi-graph-down-arrow', label: 'Custo projetado no ano', valor: U.brl(custoMedioMes * 12), invert: true })}
         ${kpiCard({ icon: 'bi-credit-card-2-front', label: 'Crédito antecipado/mês', valor: U.brl(c.liqCredMes) })}
       </div>
-      ${card('Sem antecipar × antecipando — período de ' + U.fmtDate(c.bloco.de) + ' a ' + U.fmtDate(c.bloco.ate), `
+      ${card('Sem antecipar × antecipando' + (c.mesesUsados ? ' — ' + c.mesesUsados.map(U.ymLabel).join(', ') : ''), `
         <div class="antec-comp">
           ${barra('Vendas de crédito (bruto)', c.brutoCredito, 'valor cheio no crédito', 'var(--tx-3)')}
           ${barra('Sem antecipar — receberia em ~30 dias', c.liquidoSemAntecipacao, 'já sem a taxa da maquininha', 'var(--teal)')}
