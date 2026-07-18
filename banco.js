@@ -40,11 +40,20 @@ DB.banco = (function () {
         tipo: valor >= 0 ? 'credito' : 'debito',
       });
     }
-    // saldo da conta (LEDGERBAL): âncora do fluxo de caixa real
+    // saldo da conta (LEDGERBAL): âncora do fluxo de caixa real. O Santander
+    // carimba a DTASOF com a data de EMISSÃO do arquivo (igual em todos os
+    // extratos baixados no mesmo dia), mas o valor do saldo é o do FIM do
+    // período coberto. Por isso guardamos também a data da última transação —
+    // é ela que diz qual extrato é o mais recente de verdade.
     const bal = txt.match(/<LEDGERBAL>[\s\S]*?<BALAMT>([^\r\n<]+)[\s\S]*?<DTASOF>(\d{8})/);
-    if (bal) {
+    if (bal && txs.length) {
       const v = U.toNum(bal[1]), d = bal[2];
-      txs._saldo = { valor: v, data: new Date(+d.slice(0, 4), +d.slice(4, 6) - 1, +d.slice(6, 8)) };
+      const ultimaTx = new Date(Math.max(...txs.map(t => +t.data)));
+      txs._saldo = {
+        valor: v,
+        data: new Date(+d.slice(0, 4), +d.slice(4, 6) - 1, +d.slice(6, 8)),
+        ateTx: ultimaTx,   // até quando o extrato realmente vai (para comparar recência)
+      };
     }
     return txs;
   }
@@ -82,20 +91,48 @@ DB.banco = (function () {
       const d = JSON.parse(localStorage.getItem(LS_KEY) || 'null');
       if (!d) return null;
       const out = { txs: d.txs.map(rev), atualizadoEm: d.atualizadoEm ? new Date(d.atualizadoEm) : null };
-      if (d.saldo) out.saldo = { valor: d.saldo.valor, data: new Date(d.saldo.data) };
+      if (d.saldo) out.saldo = { valor: d.saldo.valor, data: new Date(d.saldo.data), ateTx: d.saldo.ateTx ? new Date(d.saldo.ateTx) : new Date(d.saldo.data) };
       return out;
     } catch { return null; }
   }
   function salvar(dados) { try { localStorage.setItem(LS_KEY, JSON.stringify(dados)); } catch { /* cheio */ } }
   function limpar() { localStorage.removeItem(LS_KEY); }
 
+  // Chave de deduplicação estável: o FITID do Santander muda a cada exportação
+  // (embute data/hora do download), então NÃO serve para dedup entre arquivos.
+  // Usamos uma assinatura do próprio lançamento: data + valor + descrição.
+  function chaveDedup(t) {
+    const dia = t.data.getFullYear() + '-' + (t.data.getMonth() + 1) + '-' + t.data.getDate();
+    const memo = (t.memo || '').replace(/\s+/g, ' ').trim().toLowerCase();
+    return dia + '|' + t.valor.toFixed(2) + '|' + memo;
+  }
+
   function mesclar(atual, novosTxs) {
-    const mapa = new Map((atual?.txs || []).map(t => [t.fitid, t]));
-    for (const t of novosTxs) mapa.set(t.fitid, t);           // FITID é único por lançamento
-    const out = { txs: [...mapa.values()].sort((a, b) => a.data - b.data), atualizadoEm: new Date() };
-    // mantém o saldo mais recente (o do extrato com data mais nova)
+    // agrupa por chave de assinatura; quando há vários lançamentos idênticos no
+    // mesmo dia (ex.: duas vendas de R$ 21,00), preserva a contagem usando um
+    // sufixo incremental por chave dentro de cada fonte.
+    const contar = lista => {
+      const vistos = {}, comChave = [];
+      for (const t of lista) {
+        const base = chaveDedup(t);
+        vistos[base] = (vistos[base] || 0) + 1;
+        comChave.push([base + '#' + vistos[base], t]);
+      }
+      return comChave;
+    };
+    const mapa = new Map(contar(atual?.txs || []));
+    // para os novos, recontamos as ocorrências e só adicionamos as que faltam
+    for (const [chave, t] of contar(novosTxs)) {
+      if (!mapa.has(chave)) mapa.set(chave, t);
+    }
+    const txs = [...mapa.values()].sort((a, b) => a.data - b.data);
+    const out = { txs, atualizadoEm: new Date() };
+    // saldo: escolhe o do extrato que cobre o período MAIS RECENTE (pela última
+    // transação coberta), já que a data de emissão é igual entre exportações
+    // feitas no mesmo dia.
+    const recencia = s => +(s.ateTx || s.data);
     const candidatos = [atual?.saldo, novosTxs._saldo].filter(Boolean);
-    if (candidatos.length) out.saldo = candidatos.reduce((a, b) => (b.data > a.data ? b : a));
+    if (candidatos.length) out.saldo = candidatos.reduce((a, b) => (recencia(b) > recencia(a) ? b : a));
     return out;
   }
 
@@ -114,7 +151,7 @@ DB.banco = (function () {
       if (!res.ok) return null;
       const d = await res.json();
       const out = { txs: d.txs.map(rev), atualizadoEm: d.atualizadoEm ? new Date(d.atualizadoEm) : null };
-      if (d.saldo) out.saldo = { valor: d.saldo.valor, data: new Date(d.saldo.data) };
+      if (d.saldo) out.saldo = { valor: d.saldo.valor, data: new Date(d.saldo.data), ateTx: d.saldo.ateTx ? new Date(d.saldo.ateTx) : new Date(d.saldo.data) };
       return out;
     } catch { return null; }
   }
